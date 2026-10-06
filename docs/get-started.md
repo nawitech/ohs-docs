@@ -25,8 +25,6 @@ By completing this quickstart, you will have a running local healthcare system w
 - **A multiplatform frontline client** capturing clinical encounters offline on mobile or desktop and syncing them through the gateway.
 - **A streaming analytical pipeline** transforming FHIR resources into relational schemas powering live Apache Superset dashboards.
 
-[Watch the 5-minute video demonstration ↗](https://ohs.foundation)
-
 ## System requirements
 
 The environment builds the gateway and the Portal inside containers, so you do not need a JDK or Node to run it. Those are needed only for the Client App and for working on the Portal source.
