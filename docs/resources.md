@@ -57,7 +57,7 @@ Opening an issue directly in the owning repository connects you with the maintai
 
 Code contributions follow the workflow of the repository that owns the material.
 
-1. Review the contribution guidelines in the target repository before starting work.
+1. Read the target repository's README and any contribution guidelines before starting work.
 2. Open an issue or join a discussion thread to discuss proposed changes with the maintainers.
 3. Submit changes via pull request with tests verifying the new behavior.
 
