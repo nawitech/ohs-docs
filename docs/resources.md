@@ -48,7 +48,7 @@ The reference implementation demonstrates how to assemble the building blocks in
 
 The Open Health Stack community collaborates across public channels and issue trackers.
 
-- [OHS Foundation discussions](https://github.com/orgs/ohs-foundation/discussions) for architecture discussions, questions about the ecosystem, and community support
+- [OHS Foundation community](https://ohs.foundation/community) for questions about the ecosystem and community support, through Discord and the monthly community calls
 - The issue tracker of the owning repository for bugs or feature requests specific to that component
 
 Opening an issue directly in the owning repository connects you with the maintainers of that component and keeps the resolution close to the code.
@@ -58,7 +58,7 @@ Opening an issue directly in the owning repository connects you with the maintai
 Code contributions follow the workflow of the repository that owns the material.
 
 1. Read the target repository's README and any contribution guidelines before starting work.
-2. Open an issue or join a discussion thread to discuss proposed changes with the maintainers.
+2. Open an issue or use the [community channels](https://ohs.foundation/community) to discuss proposed changes with the maintainers.
 3. Submit changes via pull request with tests verifying the new behavior.
 
 ## Contributing documentation
