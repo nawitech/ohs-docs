@@ -22,7 +22,7 @@ Player is five components built on the Open Health Stack's foundational librarie
 | Turn FHIR into what a screen shows | Client App | Player Client, using SQL-on-FHIR ViewDefinitions |
 | Declare what a screen shows | Configuration IG | SQL-on-FHIR |
 | Evaluate an expression over FHIR | Client App | `kotlin-fhirpath` |
-| Sign a user in | Client App and Web Portal | Keycloak, through the FHIR Gateway |
+| Sign a user in | Client App and Web Portal | Keycloak |
 | Decide whether a FHIR request is allowed | Backend | FHIR Gateway access checkers |
 | Serve APIs beyond plain FHIR | Backend | FHIR Gateway custom endpoints |
 | Manage users, roles, organisations, care teams, and locations | Web Portal | Backend endpoints |

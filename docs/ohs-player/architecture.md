@@ -46,7 +46,7 @@ Open Health Stack provides unbundled open source building blocks that can be imp
 
 ## Gateway routing and security
 
-Neither client application connects directly to the underlying FHIR server. All network requests route through the Info Gateway reverse proxy.
+Neither client application connects directly to the underlying FHIR server. Their FHIR and backend API requests route through the Info Gateway reverse proxy. Sign-in requests go directly to Keycloak.
 
 - **Un-forked FHIR store** allows swapping HAPI FHIR for any standard FHIR server without altering client applications.
 - **Centralized access control** validates OpenID Connect tokens from Keycloak and enforces role-based permissions at the gateway.
