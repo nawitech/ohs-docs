@@ -23,7 +23,7 @@ Info Gateway is a standalone reverse proxy deployed between client applications 
 - **Authentication integration** works alongside any OpenID Connect compliant Identity Provider (such as Keycloak) and OAuth2 authorization server.
 - **Granular access control** inspects FHIR REST URLs and query parameters to verify that the authenticated user possesses the permissions required for that specific clinical resource or search scope.
 - **Pluggable access checkers** allow engineering teams to write custom authorization interceptors and business validation logic.
-- **Query filtering and safety policies** enable administrators to restrict expensive search queries, disable unauthorized joins, or block full-table scans.
+- **Allowed queries** let administrators list requests that the gateway lets through without running the access checkers. Requests are matched by path, HTTP method, and query parameters.
 - **Mobile sync partitioning** limits the scope of patient records downloaded to frontline mobile devices based on practitioner assignments or health facility boundaries.
 - **SMART-on-FHIR support** enables third-party clinical apps to connect into the digital health architecture safely without direct database access.
 
@@ -41,7 +41,7 @@ Info Gateway sits directly in the request path between clients and the FHIR back
 │                  INFO GATEWAY                   │
 │  ┌───────────────────┐  ┌────────────────────┐  │
 │  │ Token Validation  │  │ Access Checkers    │  │
-│  │ (Keycloak / OIDC) │  │ & Query Filters    │  │
+│  │ (Keycloak / OIDC) │  │ & Allowed Queries  │  │
 │  └───────────────────┘  └────────────────────┘  │
 └─────────────────────────────────────────────────┘
                  │
