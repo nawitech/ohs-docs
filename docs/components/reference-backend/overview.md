@@ -23,7 +23,7 @@ Putting a gateway in front instead means three things.
 
 **The FHIR server stays unmodified.** Player uses HAPI FHIR, but nothing above the gateway depends on that choice.
 
-**Access rules live in one place.** Scoping a health worker to their assigned location, organisation, or care team is enforced once, at the gateway, rather than trusted to each application.
+**Access rules live in one place.** The gateway checks the user's roles on every request. A plugin can add narrower rules there, such as limiting a health worker to their organisation or location.
 
 **Clients never implement authorisation.** The Web Portal was built entirely on these APIs, and its team wrote no user-management or authentication logic.
 
