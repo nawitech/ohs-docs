@@ -46,13 +46,13 @@ In this pathway, organisations deploy FHIR Data Pipes alongside existing FHIR se
 
 ## Pathway D for artificial intelligence tooling and evaluation
 
-Builders and health tech startups developing clinical intelligence or decision support tools can leverage AI Commons.
+AI Commons is incubating. Its planned work covers three areas.
 
-- Structured FHIR data modeling tools to translate unstructured clinical notes into compliant resources
-- Standardized benchmarking suites to test artificial intelligence accuracy against clinical reference datasets
-- Evaluation frameworks to measure safety, hallucination rates, and protocol adherence before deployment
+- **Evaluations and benchmarks** aim to give teams open tools and shared datasets to measure the safety, quality, and effectiveness of artificial intelligence in health workflows.
+- **Health data connectors** aim to let artificial intelligence systems work safely with standards-based health data, such as FHIR.
+- **Verifiable AI** is work with the WHO and partners on the safe development and adoption of artificial intelligence in health.
 
-This pathway enables teams to deploy artificial intelligence safely, with full auditability and clinical governance.
+The Foundation's [projects page](https://ohs.foundation/projects) shows how far each area has progressed.
 
 ## Pathway E for coexistence with national health infrastructure
 
@@ -73,6 +73,6 @@ Open Health Stack is designed to be complementary to existing digital health inv
 | Add offline FHIR storage to an existing mobile app | Pathway A (Client SDKs) | [Kotlin FHIR Engine](/fhir-foundations/kotlin-fhir-engine/) |
 | Launch a complete community health solution | Pathway B (OHS Player) | [Get started with Player](/get-started/) |
 | Generate aggregate reports from FHIR databases | Pathway C (Analytics Hub) | [Reference Analytics](/components/reference-analytics/) |
-| Validate clinical artificial intelligence safety | Pathway D (AI Commons) | [AI Commons overview](/why-ohs/#pillar-3-for-ai-commons-incubating) |
+| Follow AI evaluation work in healthcare | Pathway D (AI Commons) | [AI Commons overview](/why-ohs/#pillar-3-for-ai-commons-incubating) |
 | Connect mobile workers to an existing national EHR | Pathway E (Coexistence) | [The architecture](/ohs-player/architecture/) |
 | Explore reference solution architectures | Solution Architecture Samples | [Architecture samples and use cases](/overview/architecture-samples/) |
