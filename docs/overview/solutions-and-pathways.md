@@ -48,9 +48,9 @@ In this pathway, organisations deploy FHIR Data Pipes alongside existing FHIR se
 
 AI Commons is incubating. Its planned work covers three areas.
 
-- **Evaluations and benchmarks** aim to give teams open tools and shared datasets to measure the safety, quality, and effectiveness of artificial intelligence in health workflows.
-- **Health data connectors** aim to let artificial intelligence systems work safely with standards-based health data, such as FHIR.
-- **Verifiable AI** is work with the WHO and partners on the safe development and adoption of artificial intelligence in health.
+- **Evaluations and benchmarks** aim to provide open tools and shared datasets for measuring the safety, quality, and effectiveness of AI in health care.
+- **Health MCPs** aim to let AI systems work safely with standards-based health data through Model Context Protocol tools.
+- **Verifiable AI** is a partnership being formed with the WHO and ecosystem partners, to support the safe development and use of AI in health.
 
 The Foundation's [projects page](https://ohs.foundation/projects) shows how far each area has progressed.
 
