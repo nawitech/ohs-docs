@@ -42,11 +42,13 @@ An end-to-end reference toolkit showing how foundational building blocks assembl
 
 ### Pillar 3 for AI Commons (Incubating)
 
-An active incubation track focused on artificial intelligence safety and structured healthcare standards.
+An incubation track focused on artificial intelligence safety and structured healthcare standards. Its planned work covers three areas.
 
-- **FHIR prompt tooling** helps developers query, translate, and extract structured FHIR data with language models.
-- **Benchmarking suites** test model accuracy, clinical protocol compliance, and hallucination rates against clinical datasets.
-- **Privacy frameworks** support on-premise execution and automated clinical data de-identification.
+- **Evaluations and benchmarks** aim to provide open tools and shared datasets for measuring the safety, quality, and effectiveness of AI in health care.
+- **Health MCPs** aim to let AI systems work safely with standards-based health data through Model Context Protocol tools.
+- **Verifiable AI** is a partnership being formed with the WHO and ecosystem partners, to support the safe development and use of AI in health.
+
+The Foundation's [projects page](https://ohs.foundation/projects) shows how far each area has progressed.
 
 ## Core advantages
 
