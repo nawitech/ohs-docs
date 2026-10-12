@@ -117,7 +117,7 @@ Build a local package when the application needs to be distributed beyond develo
 | Portable application | `./gradlew :reference-app:createDistributable` |
 | Web bundle | `./gradlew :reference-app:wasmJsBrowserDistribution` |
 
-Use the [Client App deployment documentation](https://github.com/ohs-foundation/player-reference#deployment) for release-pipeline and signing detail.
+The Client App README covers the release pipeline in [CI and release](https://github.com/ohs-foundation/player-reference/blob/main/README.md#ci-and-release) and signing in [Android release signing](https://github.com/ohs-foundation/player-reference/blob/main/README.md#android-release-signing).
 
 ## Next step
 
