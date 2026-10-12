@@ -56,7 +56,7 @@ Set the four values that matter for a local environment.
 | `OAUTH_ISSUER` | The environment's `KEYCLOAK_PUBLIC_URL` followed by `/realms/ohs-player`. The default is `http://keycloak.localhost:8081/realms/ohs-player`. |
 | `OAUTH_CLIENT_ID` | The public client registered for this application |
 | `OAUTH_SCOPES` | Leave the default, which includes `offline_access` for a refresh token |
-| `FHIR_BASE_URL` | The gateway's FHIR base URL, `http://localhost:8083/fhir/`, so requests go through its access checks |
+| `FHIR_BASE_URL` | The gateway's host and the environment's `FHIR_GATEWAY_PORT`, followed by `/fhir/`, so requests go through its access checks. The default is `http://localhost:8083/fhir/`. |
 
 Point `FHIR_BASE_URL` at the gateway rather than the FHIR server directly. Sync carries the signed-in session's token, and the gateway is what validates it.
 
