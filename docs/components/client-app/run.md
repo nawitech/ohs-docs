@@ -29,16 +29,6 @@ cd player-reference
 ./gradlew build
 ```
 
-## Run the default target
-
-Run the JVM desktop target for the first local Client App check.
-
-```sh
-./gradlew :ohs-player-reference-app:run
-```
-
-The desktop application opens and renders the reference healthcare screens from its configured FHIR view state. Continue with the remaining targets when the desktop run meets the needs of the implementation.
-
 ## Connect to the environment
 
 The application signs in over OAuth 2.0 Authorization Code with PKCE against a public client, then syncs FHIR through the gateway carrying the session's bearer token.
@@ -78,9 +68,19 @@ The client must be **public with PKCE required**. There is deliberately no clien
 
 The reference environment registers a public client for this application with those redirects already set, so a local environment needs no Keycloak changes. Pointing the application at an identity server you run yourself means creating the equivalent client there.
 
+## Run the default target
+
+Run the JVM desktop target for the first local Client App check.
+
+```sh
+./gradlew :ohs-player-reference-app:run
+```
+
+The desktop application opens on its **Sign in** screen.
+
 ### Sign in and sync
 
-Sign in as a health worker created in [the Web Portal](/components/web-portal/run/). Capture data, then find the same resources through the Portal's FHIR browser to confirm the round trip.
+Select **Continue to sign in**, then sign in as a health worker created in [the Web Portal](/components/web-portal/run/). Capture data, then find the same resources through the Portal's FHIR browser to confirm the round trip.
 
 Filtering what a device receives by location, care team, and organisation is enforced by the gateway access checkers and is still in progress, so a signed-in user currently syncs the data the access rules allow rather than a scoped subset.
 
@@ -103,7 +103,7 @@ Configuration ships with the application as FHIR resources under `ohs-player-ref
 
 ## Expected result
 
-The JVM Desktop command opens the Client App window and renders the reference healthcare screens from configured FHIR view state. That completes the local Client App check. In the integrated workflow, continue after the shared Player environment and Portal administration are ready.
+The JVM Desktop command opens the Client App on its **Sign in** screen. After a health worker signs in, it renders the reference healthcare screens from configured FHIR view state. That completes the local Client App check. In the integrated workflow, continue after the shared Player environment and Portal administration are ready.
 
 ## Package for distribution
 
