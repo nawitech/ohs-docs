@@ -54,4 +54,4 @@ To change what a screen shows, [configure a screen from FHIR data](/configure/sc
 
 ## Source and releases
 
-The [player-reference repository](https://github.com/ohs-foundation/player-reference) owns the application, its build commands per platform, and its release pipeline. Every platform is built, tested, and released from CI there.
+The [player-reference repository](https://github.com/ohs-foundation/player-reference) owns the application, its build commands per platform, and its release pipeline. A version tag releases the Android app and the Linux and Windows desktop packages. Releases do not include macOS, browser, or iOS builds.
