@@ -56,7 +56,7 @@ Set the four values that matter for a local environment.
 | `OAUTH_ISSUER` | The identity realm, which for the reference environment is `ohs-player` |
 | `OAUTH_CLIENT_ID` | The public client registered for this application |
 | `OAUTH_SCOPES` | Leave the default, which includes `offline_access` for a refresh token |
-| `FHIR_BASE_URL` | The gateway's FHIR base URL, so requests pass the access checks |
+| `FHIR_BASE_URL` | The gateway's FHIR base URL, `http://localhost:8083/fhir/`, so requests go through its access checks |
 
 Point `FHIR_BASE_URL` at the gateway rather than the FHIR server directly. Sync carries the signed-in session's token, and the gateway is what validates it.
 
