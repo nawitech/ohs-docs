@@ -33,7 +33,7 @@ Care Teams is the one place a manager can change data as well as read it. Everyw
 
 ## The roles in the shipped realm
 
-The imported `ohs` realm defines eight roles. Four of them appear in the table above. The rest are named for backend capabilities and are granted to the administrator account, but the Portal itself never checks them.
+The imported `ohs-player` realm defines many roles. The eight below are the ones the Portal and its backend endpoints check. Most of the rest are per-resource roles, such as `GET_LOCATION`, that the gateway checks on FHIR requests. Four of the eight appear in the table above. The other four are backend roles granted to `admin-user`, and the Portal itself never checks them.
 
 | Role | Used by |
 | --- | --- |
