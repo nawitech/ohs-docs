@@ -50,9 +50,7 @@ That last row explains a failure mode worth anticipating. An account can pass th
 | Account | Roles | Reaches |
 | --- | --- | --- |
 | `admin-user` | `admin` and every backend role | Everything |
-| `manager-user` | `care-team-manager` and `location-hierarchy.view` | Every screen except the Setup Wizard |
-
-`manager-user` is the more interesting one to sign in as, because it shows what the Portal looks like when most of the buttons are simply absent.
+| `practitioner-user` | FHIR roles, `location-hierarchy.view` and `practitioner-details.view`, from the `Practitioner` group | No sidebar links, because it holds neither `admin` nor `care-team-manager` |
 
 ## How a screen decides to appear
 
@@ -82,7 +80,7 @@ An account holding `care-team-manager` alone therefore sees the Locations link a
 
 ## Expected result
 
-Signing in as the account shows exactly the screens its roles allow, and no others. Signing in as `manager-user` on a default build shows six screens with the Setup Wizard absent and most create and edit controls missing.
+Signing in as the account shows exactly the screens its roles allow, and no others.
 
 ## Where to go next
 
