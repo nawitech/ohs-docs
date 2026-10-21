@@ -37,7 +37,7 @@ Run the JVM desktop target for the first local Client App check.
 ./gradlew :reference-app:run
 ```
 
-The desktop application opens and renders the reference healthcare screens from its configured FHIR view state. Continue with the remaining targets when the desktop run meets the needs of the implementation.
+The desktop application opens on its **Sign in** screen. Before signing in, complete [Connect to the environment](#connect-to-the-environment).
 
 ## Connect to the environment
 
@@ -80,7 +80,7 @@ The reference environment registers a public client for this application with th
 
 ### Sign in and sync
 
-Sign in as a health worker created in [the Web Portal](/components/web-portal/run/). Capture data, then find the same resources through the Portal's FHIR browser to confirm the round trip.
+Select **Continue to sign in**, then sign in as a health worker created in [the Web Portal](/components/web-portal/run/). Capture data, then find the same resources through the Portal's FHIR browser to confirm the round trip.
 
 Filtering what a device receives by location, care team, and organisation is enforced by the gateway access checkers and is still in progress, so a signed-in user currently syncs the data the access rules allow rather than a scoped subset.
 
@@ -103,7 +103,7 @@ Configuration ships with the application as FHIR resources under `reference-app/
 
 ## Expected result
 
-The JVM Desktop command opens the Client App window and renders the reference healthcare screens from configured FHIR view state. That completes the local Client App check. In the integrated workflow, continue after the shared Player environment and Portal administration are ready.
+The JVM Desktop command opens the Client App on its **Sign in** screen. After a health worker signs in, it renders the reference healthcare screens from configured FHIR view state. That completes the local Client App check. In the integrated workflow, continue after the shared Player environment and Portal administration are ready.
 
 ## Package for distribution
 
