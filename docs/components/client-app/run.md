@@ -37,7 +37,7 @@ Run the JVM desktop target for the first local Client App check.
 ./gradlew :reference-app:run
 ```
 
-The desktop application opens and renders the reference healthcare screens from its configured FHIR view state. Continue with the remaining targets when the desktop run meets the needs of the implementation.
+The desktop application opens on its **Sign in** screen. Before signing in, complete [Connect to the environment](#connect-to-the-environment).
 
 ## Connect to the environment
 
@@ -53,10 +53,10 @@ Set the four values that matter for a local environment.
 
 | Key | Value for the reference environment |
 | --- | --- |
-| `OAUTH_ISSUER` | The identity realm, which for the reference environment is `ohs-player` |
+| `OAUTH_ISSUER` | The environment's `KEYCLOAK_PUBLIC_URL` followed by `/realms/ohs-player`. The default is `http://keycloak.localhost:8081/realms/ohs-player`. |
 | `OAUTH_CLIENT_ID` | The public client registered for this application |
 | `OAUTH_SCOPES` | Leave the default, which includes `offline_access` for a refresh token |
-| `FHIR_BASE_URL` | The gateway's FHIR base URL, so requests pass the access checks |
+| `FHIR_BASE_URL` | The gateway's host and the environment's `FHIR_GATEWAY_PORT`, followed by `/fhir/`, so requests go through its access checks. The default is `http://localhost:8083/fhir/`. |
 
 Point `FHIR_BASE_URL` at the gateway rather than the FHIR server directly. Sync carries the signed-in session's token, and the gateway is what validates it.
 
@@ -80,7 +80,7 @@ The reference environment registers a public client for this application with th
 
 ### Sign in and sync
 
-Sign in as a health worker created in [the Web Portal](/components/web-portal/run/). Capture data, then find the same resources through the Portal's FHIR browser to confirm the round trip.
+Select **Continue to sign in**, then sign in as a health worker created in [the Web Portal](/components/web-portal/run/). Capture data, then find the same resources through the Portal's FHIR browser to confirm the round trip.
 
 Filtering what a device receives by location, care team, and organisation is enforced by the gateway access checkers and is still in progress, so a signed-in user currently syncs the data the access rules allow rather than a scoped subset.
 
@@ -103,7 +103,7 @@ Configuration ships with the application as FHIR resources under `reference-app/
 
 ## Expected result
 
-The JVM Desktop command opens the Client App window and renders the reference healthcare screens from configured FHIR view state. That completes the local Client App check. In the integrated workflow, continue after the shared Player environment and Portal administration are ready.
+The JVM Desktop command opens the Client App on its **Sign in** screen. After a health worker signs in, it renders the reference healthcare screens from configured FHIR view state. That completes the local Client App check. In the integrated workflow, continue after the shared Player environment and Portal administration are ready.
 
 ## Package for distribution
 
@@ -117,7 +117,7 @@ Build a local package when the application needs to be distributed beyond develo
 | Portable application | `./gradlew :reference-app:createDistributable` |
 | Web bundle | `./gradlew :reference-app:wasmJsBrowserDistribution` |
 
-Use the [Client App deployment documentation](https://github.com/ohs-foundation/player-reference#deployment) for release-pipeline and signing detail.
+The Client App README covers the release pipeline in [CI and release](https://github.com/ohs-foundation/player-reference/blob/main/README.md#ci-and-release) and signing in [Android release signing](https://github.com/ohs-foundation/player-reference/blob/main/README.md#android-release-signing).
 
 ## Next step
 
