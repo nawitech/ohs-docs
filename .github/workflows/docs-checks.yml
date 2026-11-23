@@ -1,0 +1,137 @@
+# Scheduled docs checks for the OHS docs, run from the fork nawitech/ohs-docs.
+#
+# Copy this file to .github/workflows/docs-checks.yml on the fork's default
+# branch. GitHub runs schedules only from the default branch.
+#
+# Each run builds ohs-foundation/ohs-docs at main with the check scripts from
+# this fork's tools/qa, then checks links, Gradle module names, package versions,
+# version agreement, the Portal routes list, sentence claims, and docker
+# compose and npm commands. The last three read the code repositories with git
+# ls-remote, raw file URLs and shallow sparse checkouts. Sentence claims parse
+# Compose files with js-yaml, which npm ci installs with the docs. The commands
+# check runs docker compose config, which the ubuntu-24.04 image includes. It
+# contacts no Docker daemon and starts nothing.
+#
+# A run fails only for new, confirmed problems, a check that could not
+# decide, or a known problem whose issue is still not posted 14 days after it
+# was added. Known problems are listed in tools/qa/known-findings.json. After
+# 7 days unposted, they are listed under Review needed. The
+# reports are uploaded as an artifact, and the summary is shown on the run page.
+#
+# The workflow reads only. It needs no secrets, and it posts nothing.
+
+name: Docs checks
+
+on:
+  schedule:
+    # Monday, Wednesday and Friday at 06:17 UTC. A minute past the hour,
+    # because GitHub delays schedules that start on the hour.
+    - cron: "17 6 * * 1,3,5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-checks
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # The runner context is not available in job-level env, so the reports
+      # folder is set here for the later steps.
+      - name: Set the reports folder
+        run: echo "REPORTS=$RUNNER_TEMP/docs-checks-reports" >> "$GITHUB_ENV"
+
+      # The check scripts and the known-findings list. Only tools/qa is
+      # checked out, so nothing else from the fork reaches the build.
+      - name: Check out the check scripts from this fork
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: checks
+          persist-credentials: false
+          sparse-checkout: |
+            tools/qa/
+          sparse-checkout-cone-mode: false
+
+      # The pages to check. Always upstream main, never the fork's own copy.
+      - name: Check out ohs-foundation/ohs-docs at main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ohs-foundation/ohs-docs
+          ref: main
+          path: docs
+          persist-credentials: false
+
+      # check:build asserts Node 24.18.0 and npm 11.16.0 exactly.
+      - name: Set up Node 24.18.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.18.0
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install npm 11.16.0
+        run: npm install -g npm@11.16.0
+
+      - name: Copy the check scripts into the docs checkout
+        run: |
+          rm -rf docs/tools/qa
+          cp -R checks/tools/qa docs/tools/qa
+
+      - name: Install and build the docs
+        working-directory: docs
+        run: |
+          npm ci
+          npm run check:build
+
+      - name: Run the checks
+        working-directory: docs
+        run: |
+          mkdir -p "$REPORTS"
+          export DOCS_COMMIT="$(git rev-parse --short HEAD)"
+          echo "Checking ohs-foundation/ohs-docs main at $DOCS_COMMIT"
+          node tools/qa/run.mjs "$REPORTS" --scheduled 2>&1 | tee "$REPORTS/run-output.txt"
+
+      # The summary lines go inside a code block, so text from the pages cannot
+      # render as Markdown on the run page.
+      # When the checks never ran, for example because the build failed, a
+      # status file still goes into the reports folder, so the artifact exists.
+      - name: Write the job summary
+        if: always()
+        run: |
+          REPORTS="${REPORTS:-$RUNNER_TEMP/docs-checks-reports}"
+          echo "REPORTS=$REPORTS" >> "$GITHUB_ENV"
+          mkdir -p "$REPORTS"
+          if [ ! -f "$REPORTS/run-output.txt" ]; then
+            echo "The checks did not run. An earlier step failed. Read the job log of run ${{ github.run_id }}." > "$REPORTS/status.txt"
+          fi
+          {
+            echo "## Docs checks"
+            echo
+            echo '```text'
+            if [ -f "$REPORTS/run-output.txt" ]; then
+              grep -E '^(Result|New|Known|Overdue|Stale entries|Blocked|Review needed|Information|Not run):' "$REPORTS/run-output.txt" || echo "The run printed no summary. Read run-output.txt in the artifact."
+            else
+              echo "The checks did not run. Read the job log."
+            fi
+            echo '```'
+            echo
+            echo "The reports are in the artifact docs-checks-${{ github.run_number }}."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-checks-${{ github.run_number }}
+          path: ${{ env.REPORTS }}
+          retention-days: 90
+          if-no-files-found: warn
