@@ -1,0 +1,117 @@
+{
+  "about": [
+    "Sentence claims. Each claim is a sentence, or part of one, that readers rely on and that one source file can prove. check-sentence-claims.mjs checks every claim on every scheduled run.",
+    "A claim holds a plain id, the page, the exact quote, the source repository and file, and one rule. The rule tests the value the quote states, and the quote must contain that value. tests says what the rule proves. notTested says what the quote also says that the rule does not prove.",
+    "Quotes match exactly, ignoring only spaces and letter case. A quote that is no longer on its page fails as quote gone, and the claim needs upkeep.",
+    "Rule kinds. env-value: the source sets key to value exactly once, as key=value. compose-port: the named service in a Docker Compose file publishes the host port value over TCP, to the container port target when the rule names one. A host port written as ${VAR} is read from envFile, a second file in the same repository at the same commit.",
+    "Claim nothing an extractor already covers, such as module names or package versions. Add claims one at a time, and have a second person confirm the rule tests the quote.",
+    "These claims replace none of the 406 in claims.json. Those are not carried over. list-count: the number the quote states, as a word or digits, equals the rows in the column of a list in list-targets.json. The list must be on the same page. The source is that table, so no repository is read."
+  ],
+  "claims": [
+    {
+      "id": "get-started/portal-port",
+      "page": "docs/get-started.md",
+      "quote": "Open the Portal at `http://localhost:8084`",
+      "source": {
+        "repository": "ohs-foundation/ohs-player-reference-infrastructure",
+        "path": ".env.example"
+      },
+      "rule": {
+        "kind": "env-value",
+        "key": "OHS_PLAYER_WEB_PORT",
+        "value": "8084"
+      },
+      "tests": "The environment's default Portal port is 8084.",
+      "notTested": "That localhost reaches it, and the sign-in account in the rest of the sentence.",
+      "added": "2026-11-21"
+    },
+    {
+      "id": "web-portal-run/portal-port",
+      "page": "docs/components/web-portal/run.md",
+      "quote": "The Portal is served at `http://localhost:8084`.",
+      "source": {
+        "repository": "ohs-foundation/ohs-player-reference-infrastructure",
+        "path": ".env.example"
+      },
+      "rule": {
+        "kind": "env-value",
+        "key": "OHS_PLAYER_WEB_PORT",
+        "value": "8084"
+      },
+      "tests": "The environment's default Portal port is 8084.",
+      "notTested": "That localhost reaches it.",
+      "added": "2026-11-21"
+    },
+    {
+      "id": "data-pipes-test-servers/hapi-port",
+      "page": "docs/tutorials-and-codelabs/data-pipes-test-servers.md",
+      "quote": "The server base URL is available at `http://localhost:8091/fhir`.",
+      "source": {
+        "repository": "ohs-foundation/fhir-data-pipes",
+        "path": "docker/hapi-compose.yml"
+      },
+      "rule": {
+        "kind": "compose-port",
+        "service": "hapi-server",
+        "value": "8091",
+        "target": "8080"
+      },
+      "tests": "The hapi-server service publishes host port 8091 over TCP to container port 8080.",
+      "notTested": "The /fhir path, and that HAPI FHIR serves HTTP on container port 8080. Both come from the HAPI FHIR image, not this file.",
+      "added": "2026-11-21"
+    },
+    {
+      "id": "data-pipes-test-servers/sink-port",
+      "page": "docs/tutorials-and-codelabs/data-pipes-test-servers.md",
+      "quote": "The destination endpoint is available at `http://localhost:8098/fhir`.",
+      "source": {
+        "repository": "ohs-foundation/fhir-data-pipes",
+        "path": "docker/sink-compose.yml"
+      },
+      "rule": {
+        "kind": "compose-port",
+        "service": "sink-server",
+        "value": "8098",
+        "target": "8080",
+        "envFile": "docker/.env"
+      },
+      "tests": "The sink-server service publishes host port ${SINK_SERVER_PORT} over TCP to container port 8080, and docker/.env sets SINK_SERVER_PORT to 8098.",
+      "notTested": "The /fhir path, and that HAPI FHIR serves HTTP on container port 8080. The Docker Compose docs say a run with -f ./docker/sink-compose.yml reads docker/.env, because the project directory is the compose file's folder (docs.docker.com/compose/how-tos/environment-variables/variable-interpolation, read 2026-11-21). A shell variable of the same name would override it.",
+      "added": "2026-11-21"
+    },
+    {
+      "id": "data-pipes-superset/thrift-port",
+      "page": "docs/tutorials-and-codelabs/data-pipes-superset.md",
+      "quote": "hive://localhost:10001/default",
+      "source": {
+        "repository": "ohs-foundation/fhir-data-pipes",
+        "path": "docker/compose-controller-spark-sql-single.yaml"
+      },
+      "rule": {
+        "kind": "compose-port",
+        "service": "spark",
+        "value": "10001",
+        "target": "10000"
+      },
+      "tests": "The spark service publishes host port 10001 over TCP to container port 10000, the HIVE_SERVER2_THRIFT_PORT it sets.",
+      "notTested": "The default database name, that the Thrift server listens on 10000 inside the container, and that the page's other steps use this compose file.",
+      "added": "2026-11-21"
+    },
+    {
+      "id": "web-portal-screens/count",
+      "page": "docs/components/web-portal/screens.md",
+      "quote": "Seven screens, each behind a feature flag and a permission.",
+      "source": {
+        "list": "portal-routes"
+      },
+      "rule": {
+        "kind": "list-count",
+        "list": "portal-routes",
+        "value": "Seven"
+      },
+      "tests": "The sentence's count matches the rows in the Path column under \"The screens\".",
+      "notTested": "That the table matches the Portal code. The lists check does that. Also the feature flag and permission part of the sentence.",
+      "added": "2026-11-23"
+    }
+  ]
+}

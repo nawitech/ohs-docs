@@ -1,0 +1,11 @@
+{
+  "about": "Which repository each page's Gradle commands run in. check-source-paths.mjs reads the settings file named here on the repository's default branch. A page with a Gradle module command that is not listed fails as not mapped. A page listed under skip is counted as skipped, with its reason.",
+  "pages": {
+    "docs/components/client-app/run.md": { "repository": "ohs-foundation/player-reference", "settings": "settings.gradle.kts" },
+    "docs/get-started.md": { "repository": "ohs-foundation/player-reference", "settings": "settings.gradle.kts" },
+    "docs/configure/screen-from-fhir-data.md": { "repository": "ohs-foundation/player-reference", "settings": "settings.gradle.kts" },
+    "docs/tutorials-and-codelabs/engine.md": { "repository": "ohs-foundation/kotlin-fhir-engine", "settings": "codelabs/settings.gradle.kts" },
+    "docs/tutorials-and-codelabs/data-capture.md": { "repository": "ohs-foundation/kotlin-fhir-data-capture", "settings": "codelabs/settings.gradle.kts" }
+  },
+  "skip": {}
+}

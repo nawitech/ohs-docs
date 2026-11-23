@@ -1,0 +1,15 @@
+{
+  "about": [
+    "Pages whose shell code blocks run docker compose, npm, pnpm or yarn, with the repository and folder those commands run in. check-commands.mjs reads those files at one commit of the repository's default branch.",
+    "folder is where each code block starts, relative to the repository root. A cd to the repository's own name moves to the root. Any other cd makes the commands after it in that block blocked, because the check does not guess folders.",
+    "A page with one of these commands that is not listed here fails as not mapped."
+  ],
+  "pages": {
+    "docs/components/web-portal/run.md": { "repository": "ohs-foundation/ohs-player-reference-web-portal", "folder": "." },
+    "docs/components/reference-infrastructure/overview.md": { "repository": "ohs-foundation/ohs-player-reference-infrastructure", "folder": "." },
+    "docs/tutorials-and-codelabs/engine.md": { "repository": "ohs-foundation/kotlin-fhir-engine", "folder": "codelabs", "folderReason": "The page says to run the command in the codelabs folder." },
+    "docs/tutorials-and-codelabs/data-pipes-test-servers.md": { "repository": "ohs-foundation/fhir-data-pipes", "folder": "." },
+    "docs/tutorials-and-codelabs/data-pipes-single-machine.md": { "repository": "ohs-foundation/fhir-data-pipes", "folder": "." },
+    "docs/tutorials-and-codelabs/info-gateway-docker.md": { "repository": "ohs-foundation/fhir-gateway", "folder": "." }
+  }
+}

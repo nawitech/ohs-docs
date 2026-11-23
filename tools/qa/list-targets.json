@@ -1,0 +1,33 @@
+{
+  "about": "Lists on a page that must match the code. check-lists.mjs reads every route path from the source files, all at one commit of the repository's default branch, and every value in one column of the tables under one heading on the page, then compares the two lists in both directions. A value in the code but not on the page, or on the page but not in the code, fails. ignore names code values that are not part of the list, with the reason in ignoreReason. allowDynamic names a path expression the reader may skip because it only repeats routes read from another source. A path that is its parent plus one parameter, such as /resources/:resourceType, is information when the parent is on the page.",
+  "lists": [
+    {
+      "id": "portal-routes",
+      "name": "Portal screens",
+      "page": "docs/components/web-portal/screens.md",
+      "heading": "The screens",
+      "column": "Path",
+      "repository": "ohs-foundation/ohs-player-reference-web-portal",
+      "sources": [
+        {
+          "file": "apps/ohs-player-web/src/AppRoutes.tsx"
+        },
+        {
+          "file": "packages/ohs-player-web-shell/src/routes/PortalRoutes.tsx",
+          "allowDynamic": [
+            "route.path"
+          ],
+          "allowDynamicReason": "PortalRoutes.tsx renders each route from the appRoutes list in AppRoutes.tsx, which is read above."
+        }
+      ],
+      "ignore": [
+        "/login",
+        "/logout",
+        "/callback",
+        "/unauthorized",
+        "*"
+      ],
+      "ignoreReason": "Sign-in, sign-out, callback, refusal and not-found routes in the Portal shell. They are not screens."
+    }
+  ]
+}
