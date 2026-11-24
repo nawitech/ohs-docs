@@ -154,10 +154,14 @@ function blockedReasons(check) {
       reasons.push(`${text(source)}. ${plural(items.length, "module use")} not checked, on ${items.map((i) => pageCell(i.file, [i.line])).join(", ")}.`);
     if (r.counts?.found === 0) reasons.push("It found no Gradle module names on the pages.");
   } else if (check === "versions") {
+    // Group by what each source answered, then list the packages and versions.
     const unreachable = (r.results ?? []).filter((i) => i.verdict === "source unreachable");
-    for (const [error, items] of group(unreachable, (i) => i.error)) {
-      const packages = [...new Set(items.map((i) => `${i.group}:${i.artifact}`))];
-      reasons.push(`Maven Central answered ${code(error)} for ${plural(packages.length, "package")}, ${packages.map(code).join(", ")}. ${plural(items.length, "use")} on the pages not checked.${/429/.test(error) ? " 429 means too many requests, and usually clears on a rerun." : ""}`);
+    const cause = (i) => i.centralError
+      ? `Maven Central answered ${i.centralError}. ${i.missingOnMirror ? "The Google mirror does not list these versions, and may be behind" : i.mirrorAnswer === "no such package" ? "The Google mirror has no such package, and may be behind" : `The Google mirror answered ${i.mirrorAnswer}`}`
+      : `Maven Central answered ${i.error}`;
+    for (const [reason, items] of group(unreachable, cause)) {
+      const uses = [...new Set(items.map((i) => `${i.group}:${i.artifact}:${i.version}`))];
+      reasons.push(`${text(reason)}. ${plural(uses.length, "version")} not checked, ${uses.map(code).join(", ")}.${/429/.test(reason) ? " 429 means too many requests, and usually clears on a rerun." : ""}`);
     }
     if (r.counts?.found === 0) reasons.push("It found no dev.ohs packages on the pages.");
   } else if (check === "version-agreement") {
@@ -205,11 +209,23 @@ const byIssue = (items) => {
   }
   return [...groups.values()];
 };
+// A check that failed on one item can still have others it could not read.
+// It is not blocked then, so their reasons go under Review needed instead.
+const unreadItems = {
+  versions: (r) => (r?.results ?? []).some((i) => i.verdict === "source unreachable"),
+  "source-paths": (r) => (r?.unreachable ?? []).length > 0,
+};
+const partlyRead = Object.keys(unreadItems).filter((check) => !blocked.includes(check) && unreadItems[check](reports[check]));
 const otherReview = review.filter((line) => {
   if (/^\d+ known entr/.test(line)) return false;
   const label = Object.keys(REVIEW_LABELS).find((l) => line.startsWith(l));
-  return !(label && blocked.includes(REVIEW_LABELS[label]));
+  return !(label && (blocked.includes(REVIEW_LABELS[label]) || partlyRead.includes(REVIEW_LABELS[label])));
 });
+// Each item is HTML. Reasons from blockedReasons are escaped already.
+const reviewItems = [
+  ...partlyRead.flatMap((check) => blockedReasons(check).map((reason) => `<b>${checkName(check)}</b>. Not checked, so not stale and not new. ${reason}`)),
+  ...otherReview.map(text),
+];
 const todo = [];
 if (notRun.length) todo.push(`Fix the run. Not run ${notRun.map(code).join(", ")}.`);
 if (blocked.length) todo.push(`Rerun the workflow. ${plural(blocked.length, "check")} could not decide, ${blocked.map(checkName).join(", ")}. The reasons are under Blocked. If a rerun is blocked again, fix the cause.`);
@@ -217,7 +233,7 @@ if (news.length) todo.push(`Triage ${plural(news.length, "new finding")} under N
 if (overdue.length) todo.push(`Post ${byIssue(overdue).map((g) => code(g.label)).join(", ")} now. ${plural(overdue.length, "known entry", "known entries")} reached ${failAfter} days not posted, and every run fails until each is posted. Then set ${code("issue")} to the URL and ${code("state")} to ${code("posted")} in known-findings.json.`);
 if (dueSoon.length) todo.push(`Post ${byIssue(dueSoon).map((g) => `${code(g.label)} before ${text(addDays(g.added, failAfter))} UTC`).join(", ")}. Runs fail from that date.`);
 if (stale.length) todo.push(`Delete ${plural(stale.length, "stale entry", "stale entries")} from known-findings.json, ${stale.map((e) => code(e.id)).join(", ")}. A stale entry was judged and matched nothing, so its fix has probably merged.`);
-if (otherReview.length) todo.push(`Read the ${plural(otherReview.length, "item")} under Review needed.`);
+if (reviewItems.length) todo.push(`Read the ${plural(reviewItems.length, "item")} under Review needed.`);
 add(heading("What to do"));
 add(todo.length ? list(todo) : para("Nothing. No new finding, no blocked check, and no known entry needs posting yet."));
 
@@ -244,9 +260,9 @@ if (blocked.length || notRun.length) {
   add(list(items));
 }
 
-if (otherReview.length) {
+if (reviewItems.length) {
   add(heading("Review needed"));
-  add(list(otherReview.slice(0, ROWS).map(text).concat(otherReview.length > ROWS ? [`And ${otherReview.length - ROWS} more. The full list is in summary.json.`] : [])));
+  add(list(reviewItems.slice(0, ROWS).concat(reviewItems.length > ROWS ? [`And ${reviewItems.length - ROWS} more. The full list is in summary.json.`] : [])));
 }
 
 if (overdue.length || dueSoon.length) {
@@ -277,6 +293,17 @@ if (links) {
   if (links.blocked?.length) info.push(["Links not judged, the site refused or failed", ["Link", "Answer", "Used on"], links.blocked.map((r) => [valueCell(r.url), code(r.status), usedOn(r)])]);
   if (links.unreachable?.length) info.push(["Links not reached, network error", ["Link", "Error", "Used on"], links.unreachable.map((r) => [valueCell(r.url), code(r.error), usedOn(r)])]);
 }
+// Only versions the mirror listed. A version it did not list is under Blocked
+// or Review needed instead.
+const mirrored = new Map();
+for (const r of reports.versions?.results ?? []) {
+  if (r.verdict !== "published" || r.registry !== "Google mirror") continue;
+  const pkg = `${r.group}:${r.artifact}`;
+  const entry = mirrored.get(pkg) ?? { why: r.centralError, versions: new Set() };
+  entry.versions.add(r.version);
+  mirrored.set(pkg, entry);
+}
+if (mirrored.size) info.push(["Versions confirmed on the Google mirror of Maven Central. The mirror shows each was published, but not whether it is the latest", ["Package", "Versions confirmed", "Maven Central answered"], [...mirrored].map(([pkg, e]) => [code(pkg), [...e.versions].map(code).join(", "), text(e.why)])]);
 const behind = (reports.versions?.results ?? []).filter((r) => r.verdict === "behind");
 if (behind.length) info.push(["Versions behind the latest on Maven Central", ["Page", "Package", "Page names", "Latest"], behind.map((r) => [pageCell(r.file, [r.line]), code(`${r.group}:${r.artifact}`), code(r.version), code(r.latest)])]);
 if (reports["version-agreement"]?.information?.length) info.push(["Version agreement notes", ["Page", "Note"], reports["version-agreement"].information.map((r) => [pageCell(r.file, [r.line]), text(r.note)])]);

@@ -162,13 +162,15 @@ for (const outcome of outcomes) {
     if (result.unreachable.length) review.push(`source paths: ${result.unreachable.length} not checked, settings file unreachable`);
     if (result.skipped.length) information.push(`source paths: ${result.skipped.length} skipped on pages listed under skip`);
   } else if (outcome.check === "versions") {
-    // A version or package that was never published fails. Maven Central not
-    // answering means the check could not decide. Behind the latest is information.
+    // A version or package that was never published fails. A version neither
+    // Maven Central nor the mirror confirmed means the check could not decide.
+    // Behind the latest, and versions confirmed on the mirror, are information.
     bad = result.results.filter((r) => r.verdict.endsWith("not found")).length;
     unknown = result.results.filter((r) => r.verdict === "source unreachable").length + (result.counts.found === 0 ? 1 : 0);
-    if (unknown) review.push(`versions: ${unknown} not checked, Maven Central unreachable or nothing found`);
+    if (unknown) review.push(`versions: ${unknown} not checked, Maven Central and the mirror could not confirm them, or nothing was found`);
     const behind = result.results.filter((r) => r.verdict === "behind").length;
     if (behind) information.push(`versions: ${behind} behind the latest`);
+    if (result.counts.fromMirror) information.push(`versions: ${result.counts.fromMirror} packages with versions confirmed on the Google mirror, not judged for latest`);
   } else if (outcome.check === "version-agreement") {
     // Pins that disagree with the versions table, or a table that disagrees
     // with itself, fail. A table that cannot be read means nothing was decided.
@@ -239,8 +241,16 @@ const inBlockedCommand = (entry) => entry.check === "commands" && pagesWithBlock
 const linksReport = fresh(REPORT.links);
 const unjudgedLinks = [...(linksReport?.blocked ?? []), ...(linksReport?.unreachable ?? [])];
 const inBlockedLink = (entry) => entry.check === "links" && unjudgedLinks.some((r) => r.url === entry.value && r.usedOn.includes(entry.page));
+// A version or module whose source could not be read was not judged either,
+// even when the same check failed on another item, so its entry is not stale.
+const unreadVersions = (fresh(REPORT.versions)?.results ?? []).filter((r) => r.verdict === "source unreachable");
+const unreadModules = fresh(REPORT["source-paths"])?.unreachable ?? [];
+const inUnreadSource = (entry) =>
+  (entry.check === "versions" && unreadVersions.some((r) => r.file === entry.page && `${r.group}:${r.artifact}:${r.version}` === entry.value)) ||
+  (entry.check === "source-paths" && unreadModules.some((r) => r.file === entry.page && r.module === entry.value));
 // A blocked check usually compared nothing, so none of its entries is stale.
-// Lists, sentence claims and commands are blocked one item at a time. When
+// Lists, sentence claims, commands, versions and Gradle modules are blocked
+// one item at a time. When
 // the report exists and other items were compared, an entry outside the
 // blocked items was judged, so it can be stale.
 const judgedDespiteBlock = (entry) => {
@@ -249,9 +259,11 @@ const judgedDespiteBlock = (entry) => {
   if (entry.check === "lists") return report.counts.lists > 0 && !inBlockedList(entry);
   if (entry.check === "sentence-claims") return report.counts.claims > 0 && !inBlockedClaim(entry);
   if (entry.check === "commands") return report.counts.commands > 0 && !inBlockedCommand(entry);
+  if (entry.check === "versions") return report.counts.found > 0 && !inUnreadSource(entry);
+  if (entry.check === "source-paths") return report.counts.checked > 0 && !inUnreadSource(entry);
   return false;
 };
-const staleEntries = knownEntries.filter((entry) => ranChecks.has(entry.check) && (checkResults[entry.check] !== "blocked" || judgedDespiteBlock(entry)) && !inBlockedList(entry) && !inBlockedClaim(entry) && !inBlockedCommand(entry) && !inBlockedLink(entry) && !knownFailures.some((item) => item.id === entry.id));
+const staleEntries = knownEntries.filter((entry) => ranChecks.has(entry.check) && (checkResults[entry.check] !== "blocked" || judgedDespiteBlock(entry)) && !inBlockedList(entry) && !inBlockedClaim(entry) && !inBlockedCommand(entry) && !inBlockedLink(entry) && !inUnreadSource(entry) && !knownFailures.some((item) => item.id === entry.id));
 
 // Known entries whose issue is not posted yet. A known problem does not fail
 // the run, so an entry left unposted would otherwise go unseen. After
