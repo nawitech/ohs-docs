@@ -100,12 +100,18 @@ jobs:
           echo "Checking ohs-foundation/ohs-docs main at $DOCS_COMMIT"
           node tools/qa/run.mjs "$REPORTS" --scheduled 2>&1 | tee "$REPORTS/run-output.txt"
 
-      # The summary lines go inside a code block, so text from the pages cannot
-      # render as Markdown on the run page.
+      # job-summary.mjs writes the summary from the reports. It says what to do,
+      # and lists each new finding with its page, value and source. It escapes
+      # text from the pages, so that text cannot change the layout. It runs from
+      # the fork's checkout, so it works even when the build failed. If it fails,
+      # the step falls back to the summary lines inside a code block.
       # When the checks never ran, for example because the build failed, a
       # status file still goes into the reports folder, so the artifact exists.
+      # The summary is also saved as job-summary.md in the artifact.
       - name: Write the job summary
         if: always()
+        env:
+          ARTIFACT_NAME: docs-checks-${{ github.run_number }}
         run: |
           REPORTS="${REPORTS:-$RUNNER_TEMP/docs-checks-reports}"
           echo "REPORTS=$REPORTS" >> "$GITHUB_ENV"
@@ -113,19 +119,32 @@ jobs:
           if [ ! -f "$REPORTS/run-output.txt" ]; then
             echo "The checks did not run. An earlier step failed. Read the job log of run ${{ github.run_id }}." > "$REPORTS/status.txt"
           fi
-          {
-            echo "## Docs checks"
-            echo
-            echo '```text'
-            if [ -f "$REPORTS/run-output.txt" ]; then
-              grep -E '^(Result|New|Known|Overdue|Stale entries|Blocked|Review needed|Information|Not run):' "$REPORTS/run-output.txt" || echo "The run printed no summary. Read run-output.txt in the artifact."
-            else
-              echo "The checks did not run. Read the job log."
-            fi
-            echo '```'
-            echo
-            echo "The reports are in the artifact docs-checks-${{ github.run_number }}."
-          } >> "$GITHUB_STEP_SUMMARY"
+          # GitHub refuses a step summary over 1 MiB, so a larger one also falls
+          # back. The fallback escapes the lines and drops carriage returns, so
+          # text from the pages stays inside its <pre> block.
+          SUMMARY="$RUNNER_TEMP/job-summary.md"
+          if node checks/tools/qa/job-summary.mjs "$REPORTS" > "$SUMMARY" && [ "$(wc -c < "$SUMMARY")" -le 1000000 ]; then
+            echo "Wrote the detailed job summary."
+          else
+            {
+              echo "## Docs checks"
+              echo
+              echo "The detailed summary could not be written. Read the job log."
+              echo
+              echo "<pre>"
+              if [ -f "$REPORTS/run-output.txt" ]; then
+                { grep -E '^(Result|New|Known|Overdue|Stale entries|Blocked|Review needed|Information|Not run):' "$REPORTS/run-output.txt" || echo "The run printed no summary. Read run-output.txt in the artifact."; } \
+                  | tr -d '\r' | cut -c1-4000 | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+              else
+                echo "The checks did not run. Read the job log."
+              fi
+              echo "</pre>"
+              echo
+              echo "The reports are in the artifact $ARTIFACT_NAME."
+            } > "$SUMMARY"
+          fi
+          cp "$SUMMARY" "$REPORTS/job-summary.md"
+          cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the reports
         if: always()
