@@ -32,9 +32,66 @@ const knownAt = process.argv.indexOf("--known");
 // The known-findings list sits beside the scripts, so it travels with them to
 // the fork. --known points at another copy.
 const knownFile = knownAt < 0 ? join(toolsRoot, "qa", "known-findings.json") : process.argv[knownAt + 1];
-const knownList = existsSync(knownFile) ? JSON.parse(readFileSync(knownFile, "utf8")) : { entries: [] };
-const knownEntries = knownList.entries;
+const knownList = existsSync(knownFile) ? JSON.parse(readFileSync(knownFile, "utf8")) : { issues: {}, entries: [] };
+const rawEntries = Array.isArray(knownList.entries) ? knownList.entries : [];
+// Only complete entries are matched. An incomplete one is a list error, and its
+// failure shows as new.
+const knownEntries = rawEntries.filter((entry) => entry && typeof entry === "object" && ["id", "check", "page", "value"].every((key) => typeof entry[key] === "string" && entry[key].trim() !== ""));
+const knownIssues = knownList.issues && typeof knownList.issues === "object" && !Array.isArray(knownList.issues) ? knownList.issues : {};
 if (!existsSync(knownFile)) console.log(`No known-findings list at ${knownFile}, so every failure counts as new.`);
+
+// Dates are UTC days, the runner's date. QA_TODAY sets the date, for tests only.
+const DAY = 86400000;
+const today = process.env.QA_TODAY ?? new Date().toISOString().slice(0, 10);
+const dateOf = (text) => {
+  if (typeof text !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const time = Date.parse(`${text}T00:00:00Z`);
+  return Number.isNaN(time) || new Date(time).toISOString().slice(0, 10) !== text ? null : time;
+};
+if (dateOf(today) === null) throw new Error(`QA_TODAY must be a date such as 2026-11-23, not ${today}`);
+const dayAfter = (date, days) => new Date(dateOf(date) + days * DAY).toISOString().slice(0, 10);
+
+// Errors in the known list fail the run, because a wrong entry can hide a
+// finding or keep an issue from being counted. Each error is listed.
+const listErrors = [];
+if (existsSync(knownFile)) {
+  if (!Array.isArray(knownList.entries)) listErrors.push("entries is not a list");
+  if (knownList.issues === undefined || knownIssues !== knownList.issues) listErrors.push("issues is missing or is not an object of issue records");
+  const words = (value) => typeof value === "string" && value.trim() !== "";
+  for (const key of ["reviewAfterDays", "failAfterDays"])
+    if (knownList[key] !== undefined && !(Number.isInteger(knownList[key]) && knownList[key] > 0)) listErrors.push(`${key} is not a whole number of days above 0`);
+  if (Number.isInteger(knownList.reviewAfterDays) && Number.isInteger(knownList.failAfterDays) && knownList.failAfterDays < knownList.reviewAfterDays)
+    listErrors.push("failAfterDays is less than reviewAfterDays");
+  for (const [label, issue] of Object.entries(knownIssues)) {
+    if (!issue || typeof issue !== "object") { listErrors.push(`${label} is not an issue record`); continue; }
+    if (!words(issue.title)) listErrors.push(`${label} has no title`);
+    if (!["posted", "not posted"].includes(issue.state)) listErrors.push(`${label} has state ${JSON.stringify(issue.state)}, not "posted" or "not posted"`);
+    const posted = typeof issue.url === "string" && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+$/.test(issue.url);
+    if (issue.state === "posted" && !posted) listErrors.push(`${label} is posted but its url is not a GitHub issue URL`);
+    if (issue.state === "not posted" && issue.url != null) listErrors.push(`${label} is not posted but has a url`);
+    if (dateOf(issue.added) === null) listErrors.push(`${label} has no valid added date`);
+    else if ((dateOf(issue.added) - dateOf(today)) / DAY > 1) listErrors.push(`${label} was added after the run date`);
+    if (issue.hold != null && !(typeof issue.hold === "object" && words(issue.hold.reason) && dateOf(issue.hold.since) !== null))
+      listErrors.push(`${label} has a hold without a reason and a valid since date`);
+    if (issue.released !== undefined && dateOf(issue.released) === null) listErrors.push(`${label} has a released date that is not a valid date`);
+    else if (issue.released !== undefined && (dateOf(issue.released) - dateOf(today)) / DAY > 1) listErrors.push(`${label} was released after the run date`);
+    if (issue.hold != null && issue.released !== undefined) listErrors.push(`${label} has both a hold and a released date`);
+    for (const key of ["cause", "fix", "draft"]) if (issue[key] != null && !words(issue[key])) listErrors.push(`${label} has an empty or non-text ${key}`);
+    if (!knownEntries.some((entry) => entry?.issue === label)) listErrors.push(`${label} has no entries. Delete it, or add its entries`);
+  }
+  const ids = new Set(), keys = new Set();
+  for (const [index, entry] of rawEntries.entries()) {
+    const name = words(entry?.id) ? entry.id : `entry ${index + 1}`;
+    if (!words(entry?.id)) listErrors.push(`${name} has no id`);
+    else if (ids.has(entry.id)) listErrors.push(`${name} is used as an id twice`);
+    else ids.add(entry.id);
+    if (!["check", "page", "value"].every((key) => words(entry?.[key]))) { listErrors.push(`${name} lacks a check, page or value`); continue; }
+    const key = `${entry.check}|${entry.page}|${entry.value}`;
+    if (keys.has(key)) listErrors.push(`${name} has the same check, page and value as another entry`);
+    keys.add(key);
+    if (!Object.hasOwn(knownIssues, entry.issue)) listErrors.push(`${name} names ${JSON.stringify(entry.issue ?? null)}, which is not in issues`);
+  }
+}
 
 // The docs commit the run checked. A copy made with git archive has no .git,
 // so the workflow passes it in DOCS_COMMIT.
@@ -45,40 +102,46 @@ const docsCommit = process.env.DOCS_COMMIT || (gitHead.status === 0 ? gitHead.st
 // known-findings list. One item per check, page and exact value. The lines it
 // appears on are listed, not matched, because lines move with every edit.
 function failuresOf(check, result) {
+  // problem says what is wrong in plain words, built from the report's own
+  // fields. source keeps the longer text that names what was compared.
   const items = [];
   if (check === "links") {
-    for (const r of [...result.broken, ...(result.redirectedToRoot ?? []), ...result.sectionNotFound])
-      for (const page of r.usedOn) items.push({ check, page, value: r.url, source: r.verdict === "redirected to root" ? `redirected to ${r.finalUrl}` : `${r.verdict}, status ${r.status ?? r.error}` });
-    for (const m of result.missingSections) items.push({ check, page: m.page, value: m.link, source: "page section missing in the build" });
+    for (const r of [...result.broken, ...(result.redirectedToRoot ?? []), ...result.sectionNotFound]) {
+      const problem = r.verdict === "redirected to root" ? `redirects to the site's home page, ${r.finalUrl}`
+        : r.verdict === "section not found" ? `the linked page has no section #${r.url.split("#")[1] ?? ""}`
+        : r.status ? `answers ${r.status}` : `could not be opened, ${r.error}`;
+      for (const page of r.usedOn) items.push({ check, page, value: r.url, problem, source: r.verdict === "redirected to root" ? `redirected to ${r.finalUrl}` : `${r.verdict}, status ${r.status ?? r.error}` });
+    }
+    for (const m of result.missingSections) items.push({ check, page: m.page, value: m.link, problem: "the section is missing from the built page", source: "page section missing in the build" });
   } else if (check === "source-paths") {
     for (const r of [...result.missing, ...result.notMapped])
-      items.push({ check, page: r.file, value: r.module, line: r.line, source: r.checkedAgainst ?? "not in gradle-targets.json" });
+      items.push({ check, page: r.file, value: r.module, line: r.line, problem: r.checkedAgainst ? `not a module in ${r.checkedAgainst}` : "the page is not in gradle-targets.json", source: r.checkedAgainst ?? "not in gradle-targets.json" });
   } else if (check === "versions") {
     for (const r of result.results.filter((r) => r.verdict.endsWith("not found")))
-      items.push({ check, page: r.file, value: `${r.group}:${r.artifact}:${r.version}`, line: r.line, source: `Maven Central, ${r.verdict}` });
+      items.push({ check, page: r.file, value: `${r.group}:${r.artifact}:${r.version}`, line: r.line, problem: r.verdict === "package not found" ? "no such package on Maven Central" : "Maven Central does not list this version", source: `Maven Central, ${r.verdict}` });
   } else if (check === "version-agreement") {
     for (const r of result.disagree)
-      items.push({ check, page: r.file, value: `${r.group}:${r.artifact}:${r.version}`, line: r.line, source: `${result.tableFile}, ${r.expectedFrom}, expects ${r.expected}` });
+      items.push({ check, page: r.file, value: `${r.group}:${r.artifact}:${r.version}`, line: r.line, problem: `${result.tableFile.split("/").pop()} expects ${r.expected}`, source: `${result.tableFile}, ${r.expectedFrom}, expects ${r.expected}` });
     for (const r of result.tableConflicts)
-      items.push({ check, page: r.file, value: r.value, source: `${r.file}, Current versions says ${r.expected}` });
+      items.push({ check, page: r.file, value: r.value, problem: `the Current versions table says ${r.expected}`, source: `${r.file}, Current versions says ${r.expected}` });
   } else if (check === "sentence-claims") {
     for (const r of result.results.filter((r) => r.verdict === "mismatch" || r.verdict === "quote gone"))
-      items.push({ check, page: r.page, value: `${r.id} ${r.verdict}`, source: `${r.source.list ? `list ${r.source.list} on the page` : `${r.source.repository} ${r.source.path}${r.commit ? ` at ${r.commit.slice(0, 7)}` : ""}`}, ${r.why}` });
+      items.push({ check, page: r.page, value: `${r.id} ${r.verdict}`, problem: r.verdict === "quote gone" ? "the quoted sentence is no longer on the page" : r.why, source: `${r.source.list ? `list ${r.source.list} on the page` : `${r.source.repository} ${r.source.path}${r.commit ? ` at ${r.commit.slice(0, 7)}` : ""}`}, ${r.why}` });
   } else if (check === "commands") {
     for (const r of result.results.filter((r) => r.verdict === "missing" || r.verdict === "not mapped"))
-      items.push({ check, page: r.file, value: r.value, line: r.line, source: r.repository ? `${r.repository} at ${result.commits[r.repository]?.slice(0, 7) ?? "local"}, ${r.why}` : r.why });
+      items.push({ check, page: r.file, value: r.value, line: r.line, problem: r.repository ? `${r.why}, at ${result.commits[r.repository]?.slice(0, 7) ?? "local"}` : r.why, source: r.repository ? `${r.repository} at ${result.commits[r.repository]?.slice(0, 7) ?? "local"}, ${r.why}` : r.why });
   } else if (check === "lists") {
     for (const list of result.lists) {
       for (const r of list.missingFromPage)
-        items.push({ check, page: list.page, value: `${list.id} ${r.value} not on the page`, source: `in ${list.repository} ${r.file} at ${list.commit.slice(0, 7)}, not on the page` });
+        items.push({ check, page: list.page, value: `${list.id} ${r.value} not on the page`, problem: `in ${list.repository} ${r.file} at ${list.commit.slice(0, 7)}, not on the page`, source: `in ${list.repository} ${r.file} at ${list.commit.slice(0, 7)}, not on the page` });
       for (const r of list.goneFromCode)
-        items.push({ check, page: list.page, value: `${list.id} ${r.value} not in the code`, line: r.line, source: `on the page, not in ${list.repository} at ${list.commit.slice(0, 7)}` });
+        items.push({ check, page: list.page, value: `${list.id} ${r.value} not in the code`, line: r.line, problem: `on the page, not in ${list.repository} at ${list.commit.slice(0, 7)}`, source: `on the page, not in ${list.repository} at ${list.commit.slice(0, 7)}` });
     }
   }
   const grouped = new Map();
   for (const item of items) {
     const key = `${item.check}|${item.page}|${item.value}`;
-    if (!grouped.has(key)) grouped.set(key, { check: item.check, page: item.page, value: item.value, source: item.source, lines: [] });
+    if (!grouped.has(key)) grouped.set(key, { check: item.check, page: item.page, value: item.value, problem: item.problem, source: item.source, lines: [] });
     if (item.line) grouped.get(key).lines.push(item.line);
   }
   return [...grouped.values()];
@@ -130,6 +193,7 @@ for (const check of SETS[mode]) {
 const review = [];
 const information = [];
 let passed = 0, failed = 0, blocked = 0;
+const unread = new Set();
 
 for (const outcome of outcomes) {
   if (outcome.check === "select") continue;
@@ -139,6 +203,7 @@ for (const outcome of outcomes) {
     checkResults[outcome.check] = "blocked";
     const why = firstError(outcome.stderr);
     review.push(`${outcome.check}: no report from this run, exit ${outcome.status}${why ? `, ${why}` : ""}`);
+    unread.add(outcome.check);
     continue;
   }
   let bad = 0, unknown = 0;
@@ -211,6 +276,9 @@ for (const outcome of outcomes) {
     bad = items.filter((item) => !knownEntries.some((entry) => matches(entry, item))).length;
   }
   checkResults[outcome.check] = bad ? "fail" : unknown ? "blocked" : "pass";
+  // A check that failed can still have items it could not read. It counts as
+  // blocked too in the reasons the run did not pass.
+  if (unknown) unread.add(outcome.check);
   if (bad) failed += 1;
   else if (unknown) blocked += 1;
   else passed += 1;
@@ -263,66 +331,99 @@ const judgedDespiteBlock = (entry) => {
   if (entry.check === "source-paths") return report.counts.checked > 0 && !inUnreadSource(entry);
   return false;
 };
-const staleEntries = knownEntries.filter((entry) => ranChecks.has(entry.check) && (checkResults[entry.check] !== "blocked" || judgedDespiteBlock(entry)) && !inBlockedList(entry) && !inBlockedClaim(entry) && !inBlockedCommand(entry) && !inBlockedLink(entry) && !inUnreadSource(entry) && !knownFailures.some((item) => item.id === entry.id));
+// A check that failed can still have left items unread, such as a versions
+// table it could not read beside a new conflict. Its entries count as judged
+// only through judgedDespiteBlock then.
+const staleEntries = knownEntries.filter((entry) => ranChecks.has(entry.check) && (!unread.has(entry.check) || judgedDespiteBlock(entry)) && !inBlockedList(entry) && !inBlockedClaim(entry) && !inBlockedCommand(entry) && !inBlockedLink(entry) && !inUnreadSource(entry) && !knownFailures.some((item) => item.id === entry.id));
 
-// Known entries whose issue is not posted yet. A known problem does not fail
-// the run, so an entry left unposted would otherwise go unseen. After
+// Known issues not posted yet. A known problem does not fail the run, so an
+// issue left unposted would otherwise go unseen. Days are counted per issue,
+// from its added date, or from its released date once a hold ends. After
 // reviewAfterDays it is listed under Review needed. After failAfterDays it is
 // overdue and fails the run, because posting is in the checks owner's hands.
-// Posted entries and stale entries are not aged. Dates are UTC days, the
-// runner's date. An entry dated one day ahead, as a UTC+3 date can be just
-// after midnight, counts as added today. QA_TODAY sets the date, for tests only.
-const DAY = 86400000;
-const today = process.env.QA_TODAY ?? new Date().toISOString().slice(0, 10);
-const dateOf = (text) => {
-  if (typeof text !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
-  const time = Date.parse(`${text}T00:00:00Z`);
-  return Number.isNaN(time) || new Date(time).toISOString().slice(0, 10) !== text ? null : time;
-};
-if (dateOf(today) === null) throw new Error(`QA_TODAY must be a date such as 2026-11-23, not ${today}`);
-const setting = (key, fallback) => {
-  const value = knownList[key];
-  if (value === undefined) return fallback;
-  if (Number.isInteger(value) && value > 0) return value;
-  review.push(`known findings: ${key} is not a whole number of days, so ${fallback} is used`);
-  return fallback;
-};
+// An issue is counted while any of its entries is not stale, including an
+// entry this run could not check. Posted issues, issues whose entries are all
+// stale, and held issues are not counted. A held issue is listed as waiting
+// instead. A date one day ahead of the runner's UTC date, as a UTC+3 date can
+// be just after midnight, counts as today.
+const setting = (key, fallback) => (Number.isInteger(knownList[key]) && knownList[key] > 0 ? knownList[key] : fallback);
 let reviewAfterDays = setting("reviewAfterDays", 7);
 let failAfterDays = setting("failAfterDays", 14);
-if (failAfterDays < reviewAfterDays) {
-  review.push(`known findings: failAfterDays is less than reviewAfterDays, so 7 and 14 are used`);
-  [reviewAfterDays, failAfterDays] = [7, 14];
-}
+if (failAfterDays < reviewAfterDays) [reviewAfterDays, failAfterDays] = [7, 14];
 const staleIds = new Set(staleEntries.map((entry) => entry.id));
-const aging = [], overdue = [];
-for (const entry of knownEntries) {
-  if (staleIds.has(entry.id) || entry.state === "posted") continue;
-  const issue = String(entry.issue ?? "no issue").split("/").pop().replace(/\.md$/, "").match(/^ISSUE-\d+/)?.[0] ?? String(entry.issue ?? "no issue");
-  if (entry.state !== "not posted") { review.push(`known findings: ${entry.id} has state "${entry.state}", not "posted" or "not posted"`); continue; }
-  const added = dateOf(entry.added);
-  if (added === null) { review.push(`known findings: ${entry.id} has no valid added date, so its age is unknown`); continue; }
-  const days = Math.floor((dateOf(today) - added) / DAY);
-  if (days < -1) { review.push(`known findings: ${entry.id} was added after the run date`); continue; }
-  const item = { id: entry.id, issue: entry.issue, label: issue, state: entry.state, added: entry.added, days: Math.max(days, 0) };
-  if (item.days >= failAfterDays) overdue.push(item);
-  else if (item.days >= reviewAfterDays) aging.push(item);
+const aging = [], overdue = [], counting = [], waiting = [];
+const issueStatus = {};
+for (const [label, issue] of Object.entries(knownIssues)) {
+  if (!issue || typeof issue !== "object") continue;
+  const entries = knownEntries.filter((entry) => entry?.issue === label);
+  if (issue.state !== "not posted") { issueStatus[label] = issue.state === "posted" ? "posted" : "invalid"; continue; }
+  if (!entries.length || entries.every((entry) => staleIds.has(entry.id))) { issueStatus[label] = "all stale"; continue; }
+  if (issue.hold != null) {
+    issueStatus[label] = "waiting";
+    waiting.push({ label, reason: issue.hold?.reason ?? null, since: issue.hold?.since ?? null });
+    continue;
+  }
+  const from = issue.released ?? issue.added;
+  if (dateOf(from) === null) { issueStatus[label] = "invalid"; continue; }
+  const days = Math.max(Math.floor((dateOf(today) - dateOf(from)) / DAY), 0);
+  const item = { label, from, days, reviewOn: dayAfter(from, reviewAfterDays), failOn: dayAfter(from, failAfterDays) };
+  if (days >= failAfterDays) { overdue.push(item); issueStatus[label] = "overdue"; }
+  else if (days >= reviewAfterDays) { aging.push(item); issueStatus[label] = "review"; }
+  else issueStatus[label] = "counting";
+  counting.push(item);
 }
-const byIssue = (items) => {
-  const counts = new Map();
-  for (const item of items) counts.set(item.label, (counts.get(item.label) ?? 0) + 1);
-  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([label, count]) => `${label} (${count})`).join(", ");
-};
-if (aging.length) review.unshift(`${aging.length} known ${aging.length === 1 ? "entry" : "entries"} not posted after ${reviewAfterDays} days: ${byIssue(aging)}`);
-const notPosted = knownEntries.filter((entry) => entry.state !== "posted");
-const oldest = notPosted.map((entry) => entry.added).filter((added) => dateOf(added) !== null).sort()[0];
-const knownStates = notPosted.length ? `, ${notPosted.length} not posted${oldest ? `, oldest added ${oldest}` : ""}` : "";
-const result = failed || blocked || notRun.length || overdue.length || (ranSelect && !selection) ? "fail" : "pass";
+if (aging.length) review.unshift(`known issues: ${aging.length} not posted after ${reviewAfterDays} days, ${aging.map((item) => item.label).join(", ")}`);
+
+// Known entries this run did not check, because their check did not run or
+// could not read them. They are neither found nor stale.
+const unjudged = knownEntries.filter((entry) => entry && !staleIds.has(entry.id) && !knownFailures.some((item) => item.id === entry.id))
+  .map((entry) => ({ id: entry.id, check: entry.check, page: entry.page, value: entry.value, issue: entry.issue, why: !ranChecks.has(entry.check) ? "check not run" : "not checked" }));
+
+// A row under Worth a look is tracked in an issue when a known finding found
+// this run names the same page and the same package and version. Version
+// agreement notes have no version, so they match on page and line.
+const tracked = [];
+for (const r of fresh(REPORT.versions)?.results ?? []) {
+  if (r.verdict !== "behind") continue;
+  const value = `${r.group}:${r.artifact}:${r.version}`;
+  const hit = knownFailures.find((item) => item.page === r.file && item.value === value);
+  if (hit) tracked.push({ check: "versions", page: r.file, line: r.line, value, issue: hit.issue });
+}
+// A version agreement note names one pin on its line. Its package and version
+// come from the report's results, then match the same way as above.
+const agreement = fresh(REPORT["version-agreement"]);
+for (const r of agreement?.information ?? []) {
+  const pins = (agreement.results ?? []).filter((pin) => pin.file === r.file && pin.line === r.line && (r.note.startsWith(`${pin.artifact} `) || r.note.startsWith(`names ${pin.artifact} `)));
+  if (pins.length !== 1) continue;
+  const value = `${pins[0].group}:${pins[0].artifact}:${pins[0].version}`;
+  const hit = knownFailures.find((item) => item.page === r.file && item.value === value);
+  if (hit) tracked.push({ check: "version-agreement", page: r.file, line: r.line, value, note: r.note, issue: hit.issue });
+}
+
+// Every reason the run did not pass, in the order the summary names them.
+const failReasons = [];
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+if (newFailures.length) failReasons.push({ reason: "new", count: newFailures.length, text: plural(newFailures.length, "new finding") });
+const failedOther = Object.keys(checkResults).filter((check) => checkResults[check] === "fail" && !newFailures.some((item) => item.check === check));
+if (failedOther.length) failReasons.push({ reason: "failed", checks: failedOther, text: `${failedOther.join(" and ")} failed` });
+if (overdue.length) failReasons.push({ reason: "overdue", count: overdue.length, text: `${plural(overdue.length, "issue")} overdue` });
+if (unread.size) failReasons.push({ reason: "blocked", checks: [...unread], text: `${plural(unread.size, "check")} blocked` });
+if (notRun.length) failReasons.push({ reason: "not run", count: notRun.length, text: `${plural(notRun.length, "check")} did not run` });
+if (ranSelect && !selection) failReasons.push({ reason: "no selection", text: "the changed pages are unknown" });
+if (listErrors.length) failReasons.push({ reason: "list errors", count: listErrors.length, text: "the known findings list has errors" });
+const result = failReasons.length ? "fail" : "pass";
+
 const name = (item) => `${item.check} ${item.value} on ${item.page}${item.lines?.length ? ` line ${item.lines.join(", ")}` : ""}`;
+const knownLabels = [...new Set(knownFailures.map((item) => item.issue))];
 console.log(`Result: ${result}, docs commit ${docsCommit}`);
+if (failReasons.length) console.log(`Why: ${failReasons.map((r) => r.text).join(", ")}`);
 console.log(`New: ${newFailures.length ? newFailures.map(name).join("; ") : "nothing"}`);
-console.log(`Known: ${knownFailures.length}${knownFailures.length ? ` (${knownFailures.map((item) => item.id).join(", ")})` : ""}${knownStates ? `. The list has ${knownStates.slice(2).replace(" not posted, ", " entries not posted, the ")}` : ""}`);
-if (overdue.length) console.log(`Overdue: ${overdue.length} known ${overdue.length === 1 ? "entry" : "entries"} not posted after ${failAfterDays} days: ${byIssue(overdue)}. Post each issue, then set its URL and state "posted" in known-findings.json`);
+console.log(`Known: ${knownFailures.length}${knownFailures.length ? ` in ${plural(knownLabels.length, "issue")} (${knownLabels.join(", ")})` : ""}`);
+if (overdue.length) console.log(`Overdue: ${overdue.map((item) => `${item.label}, counted from ${item.from}`).join("; ")}. Post each issue, then set its url and state "posted" in known-findings.json`);
+if (waiting.length) console.log(`Waiting: ${waiting.map((item) => `${item.label} on hold since ${item.since}`).join("; ")}`);
+if (listErrors.length) console.log(`Known list errors: ${listErrors.join("; ")}`);
 console.log(`Stale entries: ${staleEntries.length ? staleEntries.map((entry) => entry.id).join(", ") + ". Each matched nothing, so its fix may have merged" : "nothing"}`);
+if (unjudged.length) console.log(`Known entries not checked: ${unjudged.map((entry) => entry.id).join(", ")}`);
 console.log(`Selected: ${passed + failed + blocked} checks`);
 console.log(`Passed: ${passed}`);
 console.log(`Failed: ${failed}`);
@@ -334,10 +435,16 @@ if (selection?.steps.length) console.log(`Steps to repeat: ${selection.steps.joi
 if (selection?.routes.length) console.log(`Pages to read: ${selection.routes.join(", ")}`);
 console.log(`Evidence: ${reportDirectory}/`);
 console.log("");
+// The summary shows only what is here and in the check reports. Issue records
+// are copied in full, with what this run worked out for each.
+const issues = Object.fromEntries(Object.entries(knownIssues).filter(([, issue]) => issue && typeof issue === "object").map(([label, issue]) => {
+  const count = counting.find((item) => item.label === label);
+  return [label, { ...issue, status: issueStatus[label] ?? "invalid", ...(count ? { countedFrom: count.from, days: count.days, reviewOn: count.reviewOn, failOn: count.failOn } : {}) }];
+}));
 writeFileSync(join(reportDirectory, "summary.json"), JSON.stringify({
-  checkedAt: new Date().toISOString(), docsCommit, result, knownFile, checks: checkResults,
+  checkedAt: new Date().toISOString(), docsCommit, result, failReasons, knownFile, checks: checkResults,
   new: newFailures, known: knownFailures, blocked: Object.keys(checkResults).filter((check) => checkResults[check] === "blocked"),
-  information, staleEntries, reviewNeeded: review, notRun,
-  aging: { today, reviewAfterDays, failAfterDays, review: aging, overdue },
+  unread: [...unread], information, staleEntries, unjudged, tracked, reviewNeeded: review, notRun, listErrors, issues,
+  aging: { today, reviewAfterDays, failAfterDays, review: aging, overdue, waiting },
 }, null, 2) + "\n");
 if (result === "fail") process.exitCode = 1;

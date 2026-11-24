@@ -3,12 +3,71 @@
     "Known findings. A run lists a failure that matches an entry here as known, and does not fail on it.",
     "An entry matches only when check, page and value are all equal to the failure. Line numbers are not matched. A different value on the same page is new.",
     "page is the Markdown file for source-paths, versions, version-agreement and lists, and the site route for links.",
-    "To add an entry, copy the item from the new list in summary.json, add an id, the issue, state and added. While the issue is not posted, issue is the local draft path and state is \"not posted\". Once it is posted, issue is the GitHub issue URL and state is \"posted\".",
-    "To remove an entry, delete it once its fix merges. A run lists an entry that matched nothing under staleEntries, which usually means the fix merged.",
-    "An entry still \"not posted\" reviewAfterDays after added is listed under Review needed. After failAfterDays it is overdue and fails the run. Posted entries are not aged. Dates are UTC days, as on the runner."
+    "issues holds one record per issue. title, draft, state and added are required. While the issue is not posted, url is null and state is \"not posted\". Once it is posted, url is the GitHub issue URL and state is \"posted\". cause is null until someone confirms it, and the summary then says the cause has not been checked. fix is one line taken from the draft Fixes section. hold is null, or a reason and since date when posting waits on something else.",
+    "Each entry names its issue by label, such as ISSUE-071.",
+    "To add an entry, copy the item from the new list in summary.json, add an id and the issue label. Add the issue to issues if it is new, with today as added.",
+    "To remove an entry, delete it once its fix merges. A run lists an entry that matched nothing under staleEntries, which usually means the fix merged. Delete an issue once it has no entries.",
+    "An issue still \"not posted\" reviewAfterDays after its added date is listed under Review needed. After failAfterDays it is overdue and fails the run. Posted issues are not counted. Dates are UTC days, as on the runner.",
+    "A held issue never goes under Review needed and never fails the run, however long it waits. Every run lists it under Waiting with its reason and since date. To end a hold, replace hold with released and the date. Days then count from released.",
+    "The run fails when this file has an error. An entry names an issue that is not in issues, an issue has no entries, two entries share an id or a check, page and value, state and url disagree, a date is not a real date, or a hold lacks a reason or since date."
   ],
   "reviewAfterDays": 7,
   "failAfterDays": 14,
+  "issues": {
+    "ISSUE-071": {
+      "title": "Client App commands and file links still use the reference-app module that player-reference removed",
+      "draft": "outputs/qa-runs/RUN-001/github-issues/ISSUE-071-client-module-split-commands-and-links.md",
+      "url": null,
+      "state": "not posted",
+      "added": "2026-11-19",
+      "cause": "player-reference PR #77, merged 2026-11-04, split reference-app into shared, androidApp, desktopApp and webApp",
+      "fix": "Use :desktopApp, :androidApp or :webApp in each Gradle command, and point the 4 file links under shared/src/commonMain/composeResources/files/",
+      "hold": null
+    },
+    "ISSUE-072": {
+      "title": "Engine codelab links to a conformance statement that does not exist",
+      "draft": "outputs/qa-runs/RUN-001/github-issues/ISSUE-072-engine-codelab-conformance-link.md",
+      "url": null,
+      "state": "not posted",
+      "added": "2026-11-19",
+      "cause": "ohs-docs PR #30, merged 2026-11-16, added the link. kotlin-fhir-engine docs/ has no conformance file",
+      "fix": "No fix yet. The issue asks a maintainer which page lists the supported search parameters, or whether the sentence should go",
+      "hold": null
+    },
+    "ISSUE-073": {
+      "title": "Engine and Data Capture get-started pages pin older versions than the versions table",
+      "draft": "outputs/qa-runs/RUN-001/github-issues/ISSUE-073-get-started-pins-behind-versions-table.md",
+      "url": null,
+      "state": "not posted",
+      "added": "2026-11-20",
+      "cause": "ohs-docs PR #29, merged 2026-11-18, changed the versions table and left the two get-started pages",
+      "fix": "Pin 2.0.0-alpha05 and fhir-model-r4 1.0.0-rc03 on both get-started pages. Not yet tested whether their code compiles at alpha05",
+      "hold": null
+    },
+    "ISSUE-074": {
+      "title": "Web Portal screens page misses the Audit log screen",
+      "draft": "outputs/qa-runs/RUN-001/github-issues/ISSUE-074-portal-screens-missing-audit-log.md",
+      "url": null,
+      "state": "not posted",
+      "added": "2026-11-21",
+      "cause": "Portal PR #97, merged 2026-10-01, added the /audit route",
+      "fix": "Add an Audit log row for /audit to the screens table, and change \"Seven screens\" to eight",
+      "hold": null
+    },
+    "ISSUE-030": {
+      "title": "Two FHIR Data Pipes tutorials name files that do not exist as written",
+      "draft": "outputs/qa-runs/RUN-001/github-issues/ISSUE-030-data-pipes-paths-and-ports.md",
+      "url": null,
+      "state": "not posted",
+      "added": "2026-11-23",
+      "cause": null,
+      "fix": "Use docker/openmrs-compose.yaml in the Option B command, and application.yaml in Try Pipelines Controller step 1",
+      "hold": {
+        "reason": "It waits to be posted with GROUP-05, after its tutorial walkthroughs",
+        "since": "2026-11-23"
+      }
+    }
+  },
   "entries": [
     {
       "id": "pr77-module-run",
@@ -16,9 +75,7 @@
       "page": "docs/components/client-app/run.md",
       "source": "ohs-foundation/player-reference/settings.gradle.kts",
       "value": ":reference-app",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-071-client-module-split-commands-and-links.md",
-      "state": "not posted",
-      "added": "2026-11-19"
+      "issue": "ISSUE-071"
     },
     {
       "id": "pr77-module-get-started",
@@ -26,9 +83,7 @@
       "page": "docs/get-started.md",
       "source": "ohs-foundation/player-reference/settings.gradle.kts",
       "value": ":reference-app",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-071-client-module-split-commands-and-links.md",
-      "state": "not posted",
-      "added": "2026-11-19"
+      "issue": "ISSUE-071"
     },
     {
       "id": "pr77-module-screen",
@@ -36,9 +91,7 @@
       "page": "docs/configure/screen-from-fhir-data.md",
       "source": "ohs-foundation/player-reference/settings.gradle.kts",
       "value": ":reference-app",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-071-client-module-split-commands-and-links.md",
-      "state": "not posted",
-      "added": "2026-11-19"
+      "issue": "ISSUE-071"
     },
     {
       "id": "pr77-link-patient-summary",
@@ -46,9 +99,7 @@
       "page": "/ohs-docs/configure/screen-from-fhir-data/",
       "source": "the link's destination",
       "value": "https://github.com/ohs-foundation/player-reference/blob/main/reference-app/src/commonMain/composeResources/files/states/Binary-PatientSummary.json",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-071-client-module-split-commands-and-links.md",
-      "state": "not posted",
-      "added": "2026-11-19"
+      "issue": "ISSUE-071"
     },
     {
       "id": "pr77-link-patient-summary-state",
@@ -56,9 +107,7 @@
       "page": "/ohs-docs/configure/screen-from-fhir-data/",
       "source": "the link's destination",
       "value": "https://github.com/ohs-foundation/player-reference/blob/main/reference-app/src/commonMain/composeResources/files/states/Binary-PatientSummaryState.json",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-071-client-module-split-commands-and-links.md",
-      "state": "not posted",
-      "added": "2026-11-19"
+      "issue": "ISSUE-071"
     },
     {
       "id": "pr77-link-patient-card-config",
@@ -66,9 +115,7 @@
       "page": "/ohs-docs/configure/screen-from-fhir-data/",
       "source": "the link's destination",
       "value": "https://github.com/ohs-foundation/player-reference/blob/main/reference-app/src/commonMain/composeResources/files/configs/Binary-PatientCardConfig.json",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-071-client-module-split-commands-and-links.md",
-      "state": "not posted",
-      "added": "2026-11-19"
+      "issue": "ISSUE-071"
     },
     {
       "id": "pr77-link-view-types",
@@ -76,9 +123,7 @@
       "page": "/ohs-docs/configure/screen-from-fhir-data/",
       "source": "the link's destination",
       "value": "https://github.com/ohs-foundation/player-reference/blob/main/reference-app/src/commonMain/composeResources/files/viewtypes/CodeSystem-ViewTypes.json",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-071-client-module-split-commands-and-links.md",
-      "state": "not posted",
-      "added": "2026-11-19"
+      "issue": "ISSUE-071"
     },
     {
       "id": "engine-codelab-conformance-link",
@@ -86,9 +131,7 @@
       "page": "/ohs-docs/tutorials-and-codelabs/engine/",
       "source": "the link's destination",
       "value": "https://github.com/ohs-foundation/kotlin-fhir-engine/blob/main/docs/conformance.md",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-072-engine-codelab-conformance-link.md",
-      "state": "not posted",
-      "added": "2026-11-19"
+      "issue": "ISSUE-072"
     },
     {
       "id": "versions-engine-get-started-engine",
@@ -96,9 +139,7 @@
       "page": "docs/fhir-foundations/kotlin-fhir-engine/get-started.md",
       "source": "docs/fhir-foundations/versions.md",
       "value": "dev.ohs.fhir:fhir-engine:2.0.0-alpha02",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-073-get-started-pins-behind-versions-table.md",
-      "state": "not posted",
-      "added": "2026-11-20"
+      "issue": "ISSUE-073"
     },
     {
       "id": "versions-engine-get-started-model",
@@ -106,9 +147,7 @@
       "page": "docs/fhir-foundations/kotlin-fhir-engine/get-started.md",
       "source": "docs/fhir-foundations/versions.md",
       "value": "dev.ohs.fhir:fhir-model-r4:1.0.0-beta05",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-073-get-started-pins-behind-versions-table.md",
-      "state": "not posted",
-      "added": "2026-11-20"
+      "issue": "ISSUE-073"
     },
     {
       "id": "versions-data-capture-get-started-data-capture",
@@ -116,9 +155,7 @@
       "page": "docs/fhir-foundations/kotlin-fhir-data-capture/get-started.md",
       "source": "docs/fhir-foundations/versions.md",
       "value": "dev.ohs.fhir:fhir-data-capture:2.0.0-alpha02",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-073-get-started-pins-behind-versions-table.md",
-      "state": "not posted",
-      "added": "2026-11-20"
+      "issue": "ISSUE-073"
     },
     {
       "id": "versions-data-capture-get-started-model",
@@ -126,9 +163,7 @@
       "page": "docs/fhir-foundations/kotlin-fhir-data-capture/get-started.md",
       "source": "docs/fhir-foundations/versions.md",
       "value": "dev.ohs.fhir:fhir-model:1.0.0-beta05",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-073-get-started-pins-behind-versions-table.md",
-      "state": "not posted",
-      "added": "2026-11-20"
+      "issue": "ISSUE-073"
     },
     {
       "id": "portal-audit-screen",
@@ -136,9 +171,7 @@
       "page": "docs/components/web-portal/screens.md",
       "source": "ohs-foundation/ohs-player-reference-web-portal apps/ohs-player-web/src/AppRoutes.tsx",
       "value": "portal-routes /audit not on the page",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-074-portal-screens-missing-audit-log.md",
-      "state": "not posted",
-      "added": "2026-11-21"
+      "issue": "ISSUE-074"
     },
     {
       "id": "data-pipes-openmrs-compose-file",
@@ -146,9 +179,7 @@
       "page": "docs/tutorials-and-codelabs/data-pipes-test-servers.md",
       "source": "ohs-foundation/fhir-data-pipes docker/openmrs-compose.yaml",
       "value": "compose file docker/openmrs-compose.yml",
-      "issue": "outputs/qa-runs/RUN-001/github-issues/ISSUE-030-data-pipes-paths-and-ports.md",
-      "state": "not posted",
-      "added": "2026-11-23"
+      "issue": "ISSUE-030"
     }
   ]
 }

@@ -3,9 +3,12 @@
 //
 //   node tools/qa/job-summary.mjs <reports folder> > summary.md
 //
-// The summary says what to do first, then lists every new finding with its page,
-// value and the source it was compared with, so a person can act without opening
-// the JSON files. Known findings and information are folded at the end.
+// The headline names every reason the run did not pass, and how many known
+// findings remain. What to do comes first, with the dates by which each known
+// issue must be posted. Then every new finding with its page, value and problem,
+// so a person can act without opening the JSON files. Known findings, grouped by
+// issue with each cause and fix, then Worth a look and Not compared, are folded
+// at the end.
 //
 // It reads only the reports folder and imports nothing from the docs checkout,
 // so the workflow can call it even when the build failed.
@@ -18,7 +21,9 @@
 // under BUDGET bytes, below GitHub's 1 MiB limit for one step.
 //
 // DOCS_REPO, SITE_ORIGIN and ARTIFACT_NAME can override the defaults below. On
-// GitHub, GITHUB_SERVER_URL, GITHUB_REPOSITORY and GITHUB_RUN_ID give the run link.
+// GitHub, GITHUB_SERVER_URL, GITHUB_REPOSITORY and GITHUB_RUN_ID give the run link,
+// and GITHUB_SHA the commit the checks themselves came from. Without GITHUB_SHA
+// the summary says that commit is not known.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -36,7 +41,6 @@ const RUN_URL = process.env.GITHUB_RUN_ID && process.env.GITHUB_REPOSITORY
 const ROWS = 50;
 const MAX_VALUE = 300;
 const BUDGET = 900_000;
-const DAY = 86400000;
 
 // Escaping and building blocks.
 const oneLine = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
@@ -100,11 +104,11 @@ if (!summary) {
 
 const CHECK_NAMES = {
   links: "Links", "source-paths": "Gradle modules", versions: "Package versions", "version-agreement": "Version agreement",
-  lists: "Lists that match the code", "sentence-claims": "Sentence claims", commands: "Commands",
+  lists: "Lists that match the code", "sentence-claims": "Sentence claims", commands: "Commands", claims: "Claims", "page-symbols": "Page symbols",
 };
 const REPORT_FILES = {
   links: "links.json", "source-paths": "source-paths.json", versions: "versions.json", "version-agreement": "version-agreement.json",
-  lists: "lists.json", "sentence-claims": "sentence-claims-check.json", commands: "commands.json",
+  lists: "lists.json", "sentence-claims": "sentence-claims-check.json", commands: "commands.json", claims: "claims-check.json", "page-symbols": "page-symbols.json",
 };
 // The labels run.mjs puts in front of each Review needed line.
 const REVIEW_LABELS = {
@@ -125,9 +129,9 @@ const pageCell = (page, lines = []) => {
   return commitUrl && /^[\w./-]+$/.test(p) ? link(`https://github.com/${DOCS_REPO}/blob/${commit}/${p}${nums.length ? `#L${nums[0]}` : ""}`, label) : label;
 };
 const valueCell = (value) => (safeUrl(value) ? link(value, code(value)) : code(value));
-const issueLabel = (issue) => oneLine(String(issue ?? "no issue").split("/").pop().replace(/\.md$/, "")).match(/^ISSUE-\d+/)?.[0] ?? oneLine(issue ?? "no issue");
-const addDays = (date, days) => { const t = Date.parse(`${date}T00:00:00Z`); return Number.isNaN(t) ? "an unknown date" : new Date(t + days * DAY).toISOString().slice(0, 10); };
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const sentence = (value) => { const s = oneLine(value); return `${s.charAt(0).toUpperCase()}${s.slice(1)}`; };
+const count = (n) => Number(n ?? 0).toLocaleString("en-US");
 
 const news = summary.new ?? [];
 const known = summary.known ?? [];
@@ -135,10 +139,23 @@ const stale = summary.staleEntries ?? [];
 const blocked = summary.blocked ?? [];
 const review = summary.reviewNeeded ?? [];
 const notRun = summary.notRun ?? [];
+const issues = summary.issues ?? {};
+const unjudged = summary.unjudged ?? [];
+const tracked = summary.tracked ?? [];
+const listErrors = summary.listErrors ?? [];
 const aging = summary.aging ?? {};
 const overdue = aging.overdue ?? [];
-const dueSoon = aging.review ?? [];
+const waiting = aging.waiting ?? [];
 const failAfter = aging.failAfterDays ?? 14;
+const today = aging.today ?? String(summary.checkedAt ?? "").slice(0, 10);
+
+// An issue label links to its GitHub issue once posted. Until then it names a
+// local draft, which the reader cannot open.
+const issueCell = (label) => {
+  const issue = issues[label];
+  return issue?.state === "posted" && safeUrl(issue.url) ? link(issue.url, code(label)) : code(label);
+};
+const issueList = (labels) => labels.map(issueCell).join(", ");
 
 // Why each blocked check could not decide, read from its own report.
 function blockedReasons(check) {
@@ -165,16 +182,16 @@ function blockedReasons(check) {
     }
     if (r.counts?.found === 0) reasons.push("It found no dev.ohs packages on the pages.");
   } else if (check === "version-agreement") {
-    for (const error of r.tableErrors ?? []) reasons.push(`The versions table was not read. ${text(error)}.`);
+    for (const error of r.tableErrors ?? []) reasons.push(`The versions table was not read. ${text(sentence(error))}.`);
     if (r.counts?.found === 0) reasons.push("It found no library versions on the pages.");
   } else if (check === "lists") {
-    for (const l of r.lists ?? []) for (const error of l.errors ?? []) reasons.push(`${code(l.id)} not compared. ${text(error)}.`);
+    for (const l of r.lists ?? []) for (const error of l.errors ?? []) reasons.push(`${code(l.id)} not compared. ${text(sentence(error))}.`);
     if (r.counts?.lists === 0) reasons.push("list-targets.json has no lists.");
   } else if (check === "sentence-claims") {
-    for (const i of (r.results ?? []).filter((i) => i.verdict === "blocked")) reasons.push(`${code(i.id)} on ${pageCell(i.page)} not checked. ${text(i.why)}.`);
+    for (const i of (r.results ?? []).filter((i) => i.verdict === "blocked")) reasons.push(`${code(i.id)} on ${pageCell(i.page)} not checked. ${text(sentence(i.why))}.`);
     if (r.counts?.claims === 0) reasons.push("sentence-claims.json has no claims.");
   } else if (check === "commands") {
-    for (const i of (r.results ?? []).filter((i) => i.verdict === "blocked")) reasons.push(`${code(i.value)} on ${pageCell(i.file, [i.line])} not checked. ${text(i.why)}.`);
+    for (const i of (r.results ?? []).filter((i) => i.verdict === "blocked")) reasons.push(`${code(i.value)} on ${pageCell(i.file, [i.line])} not checked. ${text(sentence(i.why))}.`);
     if (r.counts?.commands === 0) reasons.push("It found no commands on the mapped pages.");
   }
   return reasons.length ? reasons : ["Its report gives no reason. Read run-output.txt and the job log."];
@@ -192,64 +209,126 @@ const claimDetail = (item) => {
     : `The sentence states ${code(r.rule?.value)}. ${text(source)} has ${code(r.observed ?? "nothing")}. ${text(r.why ?? "")}`;
   return { value, compared };
 };
+const problemOf = (item) => text(item.problem ?? item.source);
 
-// Heading and where the run looked.
-add(`## Docs checks ${summary.result === "pass" ? "passed" : "failed"}`);
-add(para(`Checked ${code(DOCS_REPO)} at ${commitUrl ? link(commitUrl, code(commit)) : code(commit)} on ${text(String(summary.checkedAt ?? "").replace("T", " ").slice(0, 16))} UTC.`));
+// Headline. It names every reason the run did not pass, then the known count.
+const CHECK_WORDS = { claims: "claims", "page-symbols": "page symbols" };
+const reasonText = (r) => {
+  if (r.reason === "new") return plural(r.count, "new finding");
+  if (r.reason === "failed") return `${(r.checks ?? []).map((check) => CHECK_WORDS[check] ?? CHECK_NAMES[check]?.toLowerCase() ?? check).join(" and ")} failed`;
+  if (r.reason === "overdue") return `${plural(r.count, "issue")} overdue`;
+  if (r.reason === "blocked") return `${plural((r.checks ?? []).length, "check")} blocked`;
+  if (r.reason === "not run") return `${plural(r.count, "check")} did not run`;
+  if (r.reason === "no selection") return "the changed pages are unknown";
+  if (r.reason === "list errors") return "the known findings list has errors";
+  return r.text ?? r.reason;
+};
+const knownLabels = [...new Set(known.map((item) => item.issue))];
+const reasons = (summary.failReasons ?? []).map(reasonText);
+if (summary.result !== "pass" && !reasons.length) reasons.push("the checks failed");
+const lead = reasons.length ? reasons.join(", ") : "no new findings";
+const knownPart = known.length ? `. ${plural(known.length, "known finding")} ${known.length === 1 ? "remains" : "remain"}, in ${plural(knownLabels.length, "issue")}` : "";
+add(`## ${text(`${lead.charAt(0).toUpperCase()}${lead.slice(1)}${knownPart}`)}`);
+
+// Where the run looked. The checks' own commit is the fork commit GitHub ran.
+const SHA = oneLine(process.env.GITHUB_SHA ?? "");
+const toolsRepo = oneLine(process.env.GITHUB_REPOSITORY ?? "");
+const toolsAt = /^[0-9a-f]{40}$/.test(SHA) && /^[\w.-]+\/[\w.-]+$/.test(toolsRepo)
+  ? `, with the checks from ${code(toolsRepo)} at ${link(`${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${toolsRepo}/commit/${SHA}`, code(SHA.slice(0, 7)))}`
+  : ". The commit of the checks themselves is not known";
+add(para(`Checked ${code(DOCS_REPO)} at ${commitUrl ? link(commitUrl, code(commit)) : code(commit)} on ${text(String(summary.checkedAt ?? "").replace("T", " ").slice(0, 16))} UTC${toolsAt}.`));
 
 // What to do, in the order a person should do it.
-const byIssue = (items) => {
-  const groups = new Map();
-  for (const item of items) {
-    const label = issueLabel(item.issue);
-    if (!groups.has(label)) groups.set(label, { label, added: item.added, ids: [], state: item.state });
-    const g = groups.get(label);
-    g.ids.push(item.id);
-    if (String(item.added) < String(g.added)) g.added = item.added;
-  }
-  return [...groups.values()];
-};
 // A check that failed on one item can still have others it could not read.
 // It is not blocked then, so their reasons go under Review needed instead.
 const unreadItems = {
   versions: (r) => (r?.results ?? []).some((i) => i.verdict === "source unreachable"),
   "source-paths": (r) => (r?.unreachable ?? []).length > 0,
+  "version-agreement": (r) => (r?.tableErrors ?? []).length > 0,
 };
 const partlyRead = Object.keys(unreadItems).filter((check) => !blocked.includes(check) && unreadItems[check](reports[check]));
+// run.mjs starts most Review needed lines with a check label and a colon. The
+// summary shows the check's name in bold and the rest as a sentence.
+const LINE_NAMES = { select: "Changed pages", "page symbols": "Page symbols", "known findings": "Known findings" };
+const reviewLine = (line) => {
+  const m = oneLine(line).match(/^([a-z][a-z -]*): (.+)$/);
+  if (!m) return text(line);
+  const check = REVIEW_LABELS[`${m[1]}:`] ?? Object.keys(CHECK_NAMES).find((key) => key === m[1] || key === m[1].replaceAll(" ", "-"));
+  const name = check ? checkName(check) : text(LINE_NAMES[m[1]] ?? `${m[1].charAt(0).toUpperCase()}${m[1].slice(1)}`);
+  return `<b>${name}</b>. ${text(sentence(m[2]))}`;
+};
 const otherReview = review.filter((line) => {
-  if (/^\d+ known entr/.test(line)) return false;
+  if (/^known issues: /.test(line)) return false;
   const label = Object.keys(REVIEW_LABELS).find((l) => line.startsWith(l));
   return !(label && (blocked.includes(REVIEW_LABELS[label]) || partlyRead.includes(REVIEW_LABELS[label])));
 });
 // Each item is HTML. Reasons from blockedReasons are escaped already.
 const reviewItems = [
   ...partlyRead.flatMap((check) => blockedReasons(check).map((reason) => `<b>${checkName(check)}</b>. Not checked, so not stale and not new. ${reason}`)),
-  ...otherReview.map(text),
+  ...otherReview.map((line) => reviewLine(line)),
 ];
 const todo = [];
+if (listErrors.length) todo.push(`Fix known-findings.json. Every run fails until each error is fixed.${list(listErrors.slice(0, ROWS).map(text).concat(listErrors.length > ROWS ? [`And ${listErrors.length - ROWS} more. The full list is in summary.json.`] : []))}`);
 if (notRun.length) todo.push(`Fix the run. Not run ${notRun.map(code).join(", ")}.`);
 if (blocked.length) todo.push(`Rerun the workflow. ${plural(blocked.length, "check")} could not decide, ${blocked.map(checkName).join(", ")}. The reasons are under Blocked. If a rerun is blocked again, fix the cause.`);
 if (news.length) todo.push(`Triage ${plural(news.length, "new finding")} under New findings. For each, open the page and the source. If the problem is real, draft the issue and add a known entry. If the check is wrong, fix the check or its targets file.`);
-if (overdue.length) todo.push(`Post ${byIssue(overdue).map((g) => code(g.label)).join(", ")} now. ${plural(overdue.length, "known entry", "known entries")} reached ${failAfter} days not posted, and every run fails until each is posted. Then set ${code("issue")} to the URL and ${code("state")} to ${code("posted")} in known-findings.json.`);
-if (dueSoon.length) todo.push(`Post ${byIssue(dueSoon).map((g) => `${code(g.label)} before ${text(addDays(g.added, failAfter))} UTC`).join(", ")}. Runs fail from that date.`);
-if (stale.length) todo.push(`Delete ${plural(stale.length, "stale entry", "stale entries")} from known-findings.json, ${stale.map((e) => code(e.id)).join(", ")}. A stale entry was judged and matched nothing, so its fix has probably merged.`);
+const failedOther = (summary.failReasons ?? []).find((r) => r.reason === "failed");
+if (failedOther) todo.push(`Read run-output.txt for ${failedOther.checks.map(checkName).join(" and ")}. ${failedOther.checks.length === 1 ? "It" : "They"} failed without a finding this summary can list.`);
+if (overdue.length) todo.push(`Post ${issueList(overdue.map((item) => item.label))} now. ${overdue.length === 1 ? "It has" : "They have"} gone ${failAfter} days without being posted, and every run fails until each is posted. Then set ${code("url")} and set ${code("state")} to ${code("posted")} for the issue in known-findings.json.`);
+const inReview = (aging.review ?? []).map((item) => item.label);
+if (inReview.length) todo.push(`Post ${issueList(inReview)}. ${inReview.length === 1 ? "It has" : "They have"} gone ${aging.reviewAfterDays ?? 7} days without being posted. The dates runs start to fail are below.`);
+if (stale.length) todo.push(`Delete ${plural(stale.length, "stale entry", "stale entries")} from known-findings.json, ${stale.map((e) => code(e.id)).join(", ")}. A stale entry was checked and matched nothing, so its fix has probably merged. Delete an issue once it has no entries.`);
 if (reviewItems.length) todo.push(`Read the ${plural(reviewItems.length, "item")} under Review needed.`);
+// The coming dates of every issue still being counted.
+const coming = new Map();
+for (const label of Object.keys(issues)) {
+  const issue = issues[label];
+  if (!["counting", "review"].includes(issue.status)) continue;
+  for (const [date, what] of [[issue.reviewOn, "Listed under Review needed"], [issue.failOn, "Fails the run"]]) {
+    if (!date || date <= today) continue;
+    const key = `${date}|${what}`;
+    coming.set(key, [...(coming.get(key) ?? []), label]);
+  }
+}
+const comingRows = [...coming].sort(([a], [b]) => a.localeCompare(b)).map(([key, labels]) => { const [date, what] = key.split("|"); return [text(date), text(what), issueList(labels)]; });
 add(heading("What to do"));
-add(todo.length ? list(todo) : para("Nothing. No new finding, no blocked check, and no known entry needs posting yet."));
+if (todo.length) add(list(todo));
+if (comingRows.length) {
+  add(para(todo.length ? "Then post these issues before they reach their dates." : "Post these issues before they reach their dates."));
+  add(table(["Date", "What happens", "Issues"], comingRows));
+}
+for (const item of waiting) add(para(`${issueCell(item.label)} is on hold since ${text(item.since)}. ${text(item.reason)}.`));
+if (!todo.length && !comingRows.length && !waiting.length) add(para("Nothing. No new finding, no blocked check, and no known issue needs posting yet."));
+if (summary.result === "pass") {
+  const claims = reports["sentence-claims"]?.counts?.claims;
+  add(para(`A pass covers what the checks read. It does not cover prose beyond ${Number.isInteger(claims) ? `the ${plural(claims, "sentence claim")}` : "the sentence claims"}, screenshots, or whether code samples compile.`));
+}
 
-// One row per check.
+// One row per check, with what it read.
+const checked = (check) => {
+  const c = reports[check]?.counts;
+  if (!c) return "no report";
+  if (check === "links") return `${count(c.outsideLinks)} outside links, ${count(c.sectionLinksChecked)} section links`;
+  if (check === "source-paths") return plural(c.found ?? 0, "module use");
+  if (check === "versions") return plural(c.found ?? 0, "package version use");
+  if (check === "version-agreement") return `${plural(c.found ?? 0, "version use")} on ${plural(c.pages ?? 0, "page")}`;
+  if (check === "lists") return `${plural(c.lists ?? 0, "list")}, ${plural(c.inCode ?? 0, "value")} in the code`;
+  if (check === "sentence-claims") return plural(c.claims ?? 0, "claim");
+  if (check === "commands") return `${plural(c.values ?? 0, "value")} in ${plural(c.commands ?? 0, "command")}`;
+  return "";
+};
 const countBy = (items, check) => items.filter((item) => item.check === check).length;
 add(heading("Checks"));
-add(table(["Check", "Result", "New", "Known"], Object.entries(summary.checks ?? {}).map(([check, result]) => [
-  checkName(check), result === "pass" ? "pass" : `<b>${text(result)}</b>`, String(countBy(news, check)), String(countBy(known, check)),
+add(table(["Check", "Result", "Checked", "New", "Known"], Object.entries(summary.checks ?? {}).map(([check, result]) => [
+  checkName(check), result === "pass" ? "pass" : `<b>${text(result)}</b>`, text(checked(check)), String(countBy(news, check)), String(countBy(known, check)),
 ])));
 
 if (news.length) {
   add(heading(`New findings (${news.length})`));
   add(para("Each fails the run. Page links open the docs source at the checked commit, or the live page for links."));
-  add(table(["Check", "Page", "Value", "Compared with"], news.map((item) => {
+  add(table(["Check", "Page", "Found", "Problem"], news.map((item) => {
     const claim = item.check === "sentence-claims" ? claimDetail(item) : null;
-    return [checkName(item.check), pageCell(item.page, item.lines ?? []), claim?.value ?? valueCell(item.value), claim?.compared ?? text(item.source)];
+    return [checkName(item.check), pageCell(item.page, item.lines ?? []), claim?.value ?? valueCell(item.value), claim?.compared ?? problemOf(item)];
   })));
 }
 
@@ -265,34 +344,66 @@ if (reviewItems.length) {
   add(list(reviewItems.slice(0, ROWS).concat(reviewItems.length > ROWS ? [`And ${reviewItems.length - ROWS} more. The full list is in summary.json.`] : [])));
 }
 
-if (overdue.length || dueSoon.length) {
-  add(heading("Known issues not posted"));
-  const groups = [...byIssue(overdue).map((g) => ({ ...g, note: "Overdue. Every run fails" })), ...byIssue(dueSoon).map((g) => ({ ...g, note: "Not posted after 7 days" }))];
-  add(table(["Draft", "Entries", "Added", "Runs fail from", "State"], groups.map((g) => [
-    code(g.label), g.ids.map(code).join(", "), text(g.added), text(addDays(g.added, failAfter)), text(g.note),
-  ])));
-}
-
 if (stale.length) {
   add(heading(`Stale entries (${stale.length})`));
-  add(table(["Entry", "Check", "Page", "Value", "Draft"], stale.map((e) => [code(e.id), checkName(e.check), pageCell(e.page), valueCell(e.value), code(issueLabel(e.issue))])));
+  add(table(["Entry", "Issue", "Check", "Page", "Value"], stale.map((e) => [code(e.id), issueCell(e.issue), checkName(e.check), pageCell(e.page), valueCell(e.value)])));
 }
 
-if (known.length) {
-  add(folded(`Known findings (${known.length}). They do not fail the run.`, [table(["Draft", "Entry", "Check", "Page", "Value"], known.map((item) => [
-    code(issueLabel(item.issue)), code(item.id), checkName(item.check), pageCell(item.page, item.lines ?? []), valueCell(item.value),
-  ]))]));
+// Known findings, one group per issue, with its cause and fix.
+if (known.length || unjudged.length) {
+  const parts = [para("ISSUE labels name local drafts until the issue is posted. A posted issue links to GitHub.")];
+  for (const label of knownLabels) {
+    const issue = issues[label];
+    const rows = known.filter((item) => item.issue === label);
+    if (!issue) {
+      parts.push(para(`<b>${code(label)}</b>. This issue is not in the issues list of known-findings.json.`));
+    } else {
+      const state = issue.state === "posted" ? "Posted" : "Not posted";
+      const status = issue.status === "waiting" ? ` On hold since ${text(issue.hold?.since)}. ${text(issue.hold?.reason)}.`
+        : issue.status === "overdue" ? " Overdue, so every run fails until it is posted."
+        : "";
+      parts.push(para(`<b>${issueCell(label)}. ${text(issue.title)}.</b> ${state}, added ${text(issue.added)}.${status}`));
+      parts.push(list([
+        issue.cause ? `Caused by ${text(issue.cause)}.` : "Cause has not been checked.",
+        issue.fix ? `Fix. ${text(issue.fix)}.` : "Fix. Not written yet. See the draft.",
+      ]));
+    }
+    parts.push(table(["Check", "Page", "Found", "Problem"], rows.map((item) => [checkName(item.check), pageCell(item.page, item.lines ?? []), valueCell(item.value), problemOf(item)])));
+  }
+  if (unjudged.length) {
+    parts.push(para(`<b>Not checked this run (${unjudged.length})</b>. These known entries were neither found nor stale, so the count above leaves them out.`));
+    parts.push(table(["Issue", "Entry", "Check", "Page", "Value"], unjudged.map((e) => [issueCell(e.issue), code(e.id), checkName(e.check), pageCell(e.page), valueCell(e.value)])));
+  } else {
+    parts.push(para("Every known entry was checked this run."));
+  }
+  add(folded(`Known findings, ${known.length} in ${plural(knownLabels.length, "issue")}. They fail the run only when their issue is overdue.`, parts));
 }
 
-// Information, with the items behind each count.
-const info = [];
+// Worth a look, and Not compared, with the items behind each count.
+// A versions row matches on its package and version. A version agreement note
+// matches on its own text, since one line can hold notes for two pins.
+const trackedNote = (check, page, line, key) => {
+  const hit = tracked.find((t) => t.check === check && t.page === page && t.line === line && (check === "versions" ? t.value === key : t.note === key));
+  return hit ? `Tracked in ${issueCell(hit.issue)}` : null;
+};
+const look = [], skipped = [];
 const links = reports.links;
-if (links) {
-  const usedOn = (r) => (r.usedOn ?? []).map((p) => pageCell(p)).join(", ");
-  if (links.redirected?.length) info.push(["Links redirected to another host", ["Link", "Lands on", "Used on"], links.redirected.map((r) => [valueCell(r.url), valueCell(r.finalUrl), usedOn(r)])]);
-  if (links.blocked?.length) info.push(["Links not judged, the site refused or failed", ["Link", "Answer", "Used on"], links.blocked.map((r) => [valueCell(r.url), code(r.status), usedOn(r)])]);
-  if (links.unreachable?.length) info.push(["Links not reached, network error", ["Link", "Error", "Used on"], links.unreachable.map((r) => [valueCell(r.url), code(r.error), usedOn(r)])]);
-}
+const usedOn = (r) => (r.usedOn ?? []).map((p) => pageCell(p)).join(", ");
+if (links?.redirected?.length) look.push(["Links redirected to another host", "Before changing a link, open where it lands and confirm it is the same content.", ["Link", "Lands on", "Used on"], links.redirected.map((r) => [valueCell(r.url), valueCell(r.finalUrl), usedOn(r)])]);
+const behind = (reports.versions?.results ?? []).filter((r) => r.verdict === "behind");
+if (behind.length) look.push(["Versions behind the latest on Maven Central", "The latest version is not always the right one. Check the versions table before changing a pin.", ["Page", "Package", "Page names", "Latest", "Note"], behind.map((r) => {
+  const value = `${r.group}:${r.artifact}:${r.version}`;
+  return [pageCell(r.file, [r.line]), code(`${r.group}:${r.artifact}`), code(r.version), code(r.latest), trackedNote("versions", r.file, r.line, value) ?? "Not tracked in an issue. Check compatibility before changing it"];
+})]);
+if (reports["version-agreement"]?.information?.length) look.push(["Version agreement notes", null, ["Page", "Note"], reports["version-agreement"].information.map((r) => {
+  const note = trackedNote("version-agreement", r.file, r.line, r.note);
+  return [pageCell(r.file, [r.line]), `${text(r.note)}${note ? `. ${note}` : ""}`];
+})]);
+const covered = (reports.lists?.lists ?? []).flatMap((l) => (l.covered ?? []).map((r) => ({ ...r, id: l.id })));
+if (covered.length) look.push(["List values accepted through a parent path", "The page lists the parent path, which covers the value in the code.", ["List", "Value in the code", "Parent on the page"], covered.map((r) => [code(r.id), code(r.value), code(r.parent)])]);
+
+if (links?.blocked?.length) skipped.push(["Links not judged, the site refused or failed", null, ["Link", "Answer", "Used on"], links.blocked.map((r) => [valueCell(r.url), code(r.status), usedOn(r)])]);
+if (links?.unreachable?.length) skipped.push(["Links not reached, network error", null, ["Link", "Error", "Used on"], links.unreachable.map((r) => [valueCell(r.url), code(r.error), usedOn(r)])]);
 // Only versions the mirror listed. A version it did not list is under Blocked
 // or Review needed instead.
 const mirrored = new Map();
@@ -303,20 +414,30 @@ for (const r of reports.versions?.results ?? []) {
   entry.versions.add(r.version);
   mirrored.set(pkg, entry);
 }
-if (mirrored.size) info.push(["Versions confirmed on the Google mirror of Maven Central. The mirror shows each was published, but not whether it is the latest", ["Package", "Versions confirmed", "Maven Central answered"], [...mirrored].map(([pkg, e]) => [code(pkg), [...e.versions].map(code).join(", "), text(e.why)])]);
-const behind = (reports.versions?.results ?? []).filter((r) => r.verdict === "behind");
-if (behind.length) info.push(["Versions behind the latest on Maven Central", ["Page", "Package", "Page names", "Latest"], behind.map((r) => [pageCell(r.file, [r.line]), code(`${r.group}:${r.artifact}`), code(r.version), code(r.latest)])]);
-if (reports["version-agreement"]?.information?.length) info.push(["Version agreement notes", ["Page", "Note"], reports["version-agreement"].information.map((r) => [pageCell(r.file, [r.line]), text(r.note)])]);
-const covered = (reports.lists?.lists ?? []).flatMap((l) => (l.covered ?? []).map((r) => ({ ...r, id: l.id })));
-if (covered.length) info.push(["List values covered by a parent path", ["List", "Value", "Parent on the page"], covered.map((r) => [code(r.id), code(r.value), code(r.parent)])]);
+if (mirrored.size) skipped.push(["Versions confirmed only on the Google mirror of Maven Central", "The mirror shows each version was published. Whether it is the latest was not compared.", ["Package", "Versions confirmed", "Maven Central answered"], [...mirrored].map(([pkg, e]) => [code(pkg), [...e.versions].map(code).join(", "), text(e.why)])]);
 const builtIn = (reports.commands?.results ?? []).filter((r) => r.verdict === "information");
-if (builtIn.length) info.push(["Commands with nothing to compare", ["Page", "Command", "Why"], builtIn.map((r) => [pageCell(r.file, [r.line]), code(r.command), text(r.why)])]);
-if (reports["source-paths"]?.skipped?.length) info.push(["Gradle modules skipped on pages listed under skip", ["Page", "Module"], reports["source-paths"].skipped.map((r) => [pageCell(r.file, [r.line]), code(r.module)])]);
-const missingReports = Object.keys(reports).filter((check) => reports[check] == null && !blocked.includes(check));
-if (info.length || missingReports.length) {
-  const parts = info.map(([title, head, rows]) => `<p><b>${title} (${rows.length})</b></p>\n${table(head, rows)}`);
-  if (missingReports.length) parts.push(para(`No readable report for ${missingReports.map(checkName).join(", ")}, so its details are not shown.`));
-  add(folded(`Information (${info.reduce((n, [, , rows]) => n + rows.length, 0)} items). Nothing here fails the run.`, parts));
-}
+if (builtIn.length) skipped.push(["Commands with nothing to compare", null, ["Page", "Command", "Why"], builtIn.map((r) => [pageCell(r.file, [r.line]), code(r.command), text(r.why)])]);
+if (reports["source-paths"]?.skipped?.length) skipped.push(["Gradle modules skipped on pages listed under skip", null, ["Page", "Module"], reports["source-paths"].skipped.map((r) => [pageCell(r.file, [r.line]), code(r.module)])]);
+// Some reports give only a count of what they skipped.
+const skippedCounts = [];
+const addCount = (n, words) => { if (Number.isInteger(n) && n > 0) skippedCounts.push([n, words(n)]); };
+addCount(links?.counts?.skipped, (n) => `${plural(n, "link")} to local or example hosts`);
+addCount(reports.versions?.counts?.skipped, (n) => `${plural(n, "Maven block")} without a literal version, in the package versions check`);
+// notChecked counts pins a table error kept from being compared. They are
+// under Blocked or Review needed, not here.
+addCount(reports["version-agreement"]?.counts?.skipped, (n) => `${plural(n, "version use")} with no rule in the versions table`);
 
-finish(para(`The reports are in ${text(ARTIFACT)}${RUN_URL ? ` on ${link(RUN_URL, "the run page")}` : ""}. Start with summary.json and run-output.txt.`));
+const section = ([title, advice, head, rows]) => `<p><b>${title} (${rows.length})</b>${advice ? ` ${advice}` : ""}</p>\n${table(head, rows)}`;
+const size = (groups) => groups.reduce((n, [, , , rows]) => n + rows.length, 0);
+if (look.length) add(folded(`Worth a look (${size(look)}). Nothing here fails the run.`, look.map(section)));
+const unreadCount = blocked.length + partlyRead.length;
+if (skipped.length || skippedCounts.length) {
+  const parts = skipped.map(section);
+  if (skippedCounts.length) parts.push(para(`Also skipped, counted in the reports only. ${skippedCounts.map(([, words]) => text(words)).join(". ")}.`));
+  if (unreadCount) parts.push(para(`Items the checks could not read are under ${blocked.length ? "Blocked" : "Review needed"}, not here.`));
+  add(folded(`Not compared (${size(skipped) + skippedCounts.reduce((n, [k]) => n + k, 0)}). The checks skipped these, so a pass says nothing about them.`, parts));
+}
+const missingReports = Object.keys(reports).filter((check) => reports[check] == null && !blocked.includes(check));
+if (missingReports.length) add(para(`No readable report for ${missingReports.map(checkName).join(", ")}, so its details are not shown.`));
+
+finish(para(`The reports are in ${text(ARTIFACT)}${RUN_URL ? ` on ${link(RUN_URL, "the run page")}` : ""}. Start with summary.json for every finding and run-output.txt for each check's own output.`));
