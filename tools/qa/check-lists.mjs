@@ -88,7 +88,7 @@ function routePaths(text, file, allowDynamic = []) {
     }
     const expression = rest.match(/^\{?\s*([A-Za-z_$][\w$.]*)/)?.[1];
     if (expression && allowDynamic.includes(expression)) continue;
-    errors.push(`${file}:${line} has a path this reader cannot read: ${rest.slice(0, 40).split("\n")[0]}`);
+    errors.push(`${file} line ${line} has a path this reader cannot read, ${rest.slice(0, 40).split("\n")[0]}`);
   }
   for (const match of text.matchAll(/\bchildren\s*:\s*\[|<Route\b[^>]*\sindex\b|\bindex\s*:\s*true/g))
     errors.push(`${file}:${lineAt(text, match.index)} has nested or index routes, which this reader does not follow`);
@@ -127,12 +127,12 @@ for (const target of targets.lists) {
   let pageValues = [];
   try {
     const column = pageColumn(readFileSync(join(siteRoot, target.page), "utf8"), target.heading, target.column);
-    if (column.error) errors.push(`${target.page}: ${column.error}`);
+    if (column.error) errors.push(`${target.page}, ${column.error}`);
     else pageValues = column.values;
   } catch (error) {
     errors.push(`${target.page} not read, ${error.message}`);
   }
-  if (pageValues.length === 0 && !errors.some((error) => error.startsWith(target.page))) errors.push(`${target.page}: the "${target.column}" column is empty`);
+  if (pageValues.length === 0 && !errors.some((error) => error.startsWith(target.page))) errors.push(`${target.page}, the "${target.column}" column is empty`);
 
   // Compare, unless a side could not be read. A partial list would report
   // false differences.

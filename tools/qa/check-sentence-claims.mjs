@@ -94,11 +94,11 @@ function envValue(text, key) {
     if (quote) {
       const close = value.indexOf(quote, 1);
       if (close < 0) return { blocked: `${key} has a multiline value, which this reader does not follow` };
-      if (!/^\s*(#.*)?$/.test(value.slice(close + 1))) return { blocked: `${key} has text after its quoted value: ${value}` };
+      if (!/^\s*(#.*)?$/.test(value.slice(close + 1))) return { blocked: `${key} has text after its quoted value, in ${value}` };
       values.push(value.slice(1, close));
     } else {
       const plain = value.replace(/\s+#.*$/, "").trim();
-      if (/["'$\s]/.test(plain)) return { blocked: `${key} has a value this reader cannot read: ${value}` };
+      if (/["'$\s]/.test(plain)) return { blocked: `${key} has a value this reader cannot read, ${value}` };
       values.push(plain);
     }
   }
@@ -131,7 +131,7 @@ async function composePorts(claim, text) {
   if (env?.error) return { blocked: env.error };
   const resolve = (value) => {
     const variable = String(value).match(/^\$\{([A-Za-z_][A-Za-z0-9_]*)(?::?-[^}]*)?\}$/)?.[1];
-    if (!variable) return String(value).includes("$") ? { blocked: `a host port this reader cannot read: ${value}` } : { value: String(value) };
+    if (!variable) return String(value).includes("$") ? { blocked: `a host port this reader cannot read, ${value}` } : { value: String(value) };
     if (!env) return { blocked: `the host port ${value} is a variable, and the rule names no envFile` };
     const result = envValue(env.text, variable);
     if (result.blocked) return { blocked: result.blocked };

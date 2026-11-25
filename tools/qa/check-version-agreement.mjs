@@ -55,7 +55,7 @@ for (const [repository, artifactCell, versionCell] of currentRows ?? []) {
   const artifact = artifactCell?.match(/`([a-z0-9-]+)`/)?.[1];
   const family = artifact && familyOf(artifact);
   const version = versionCell?.match(VERSION)?.[0];
-  if (!family || !version) { tableErrors.push(`Current versions row not read: ${repository}`); continue; }
+  if (!family || !version) { tableErrors.push(`Current versions row for ${repository} not read`); continue; }
   current[family] = { artifact, version };
   repositoryFamily.push([repository, family]);
 }
@@ -71,7 +71,7 @@ for (const [libraryCell, builtAgainst] of pairingRows ?? []) {
   const version = match && libraryCell.slice(match[0].length).trim().match(VERSION)?.[0];
   const pairs = [...(builtAgainst ?? "").matchAll(/`([a-z0-9-]+)`\s+([0-9][A-Za-z0-9_.-]*)/g)]
     .map(([, artifact, pairedVersion]) => ({ family: familyOf(artifact), artifact, version: pairedVersion }));
-  if (!match || !version || pairs.length === 0) { tableErrors.push(`Pairing row not read: ${libraryCell}`); continue; }
+  if (!match || !version || pairs.length === 0) { tableErrors.push(`Pairing row ${libraryCell} not read`); continue; }
   pairing[match[1]] = { version, builtAgainst: Object.fromEntries(pairs.map((pair) => [pair.family, pair])) };
 }
 if (Object.keys(current).length < 2) tableErrors.push("Fewer than 2 Current versions rows read");
