@@ -10,7 +10,7 @@
 // to the root, such as https://example.com/ or https://example.com/en/, fails as
 // redirected to root, because sites send readers there when a page is gone. An answer of 200 does not prove the destination holds
 // what the link text promises. That part is reviewed by a person.
-import { builtPages, inBatches, request, writeReport } from "./lib.mjs";
+import { builtPages, inBatches, request, routeOfSlug, slugOf, sourcePages, writeReport } from "./lib.mjs";
 
 // QA_LINKS_ALLOW_LOOPBACK=1 is for tests only. It lets a test page link to a
 // local server on 127.0.0.1.
@@ -25,6 +25,18 @@ const isBlockedStatus = (status) => blockedStatuses.has(status) || (status >= 50
 
 const pages = await builtPages();
 const htmlByRoute = new Map(pages.map((page) => [page.route, page.html]));
+
+// This check reads only the pages in tools/routes.json. A docs page missing
+// from it would never have its links read, so each one fails. The route comes
+// from the page's slug, which must start with /. A partial is not a page.
+const notInRoutes = [], relativeSlugs = [];
+for (const { file, text, partial } of await sourcePages()) {
+  if (partial) continue;
+  const slug = slugOf(text);
+  const route = routeOfSlug(slug);
+  if (!route) relativeSlugs.push({ file, slug });
+  else if (!htmlByRoute.has(route)) notInRoutes.push({ file, route });
+}
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // Accept quoted and unquoted attribute values, such as id="join" and id=join.
 // A site's home page is its root, or a root with one language folder, such as
@@ -133,6 +145,8 @@ for (const result of results.filter((result) => result.verdict !== "ok"))
   console.log(`${result.verdict}  ${result.status ?? result.error}  ${result.url}  on ${where(result.usedOn)}`);
 for (const result of redirected) console.log(`redirected  ${result.url}  to ${result.finalUrl}  on ${where(result.usedOn)}`);
 for (const missing of missingSections) console.log(`section missing  ${missing.link}  on ${missing.page}`);
+for (const page of notInRoutes) console.log(`not in tools/routes.json  ${page.route}  from ${page.file}`);
+for (const page of relativeSlugs) console.log(`slug does not start with /  ${page.slug ?? "no slug"}  in ${page.file}`);
 const counts = {
   anchorsScanned,
   outsideLinks: results.length,
@@ -146,13 +160,16 @@ const counts = {
   missingPageSections: missingSections.length,
   blocked: pick("blocked").length,
   unreachable: pick("unreachable").length,
+  notInRoutes: notInRoutes.length,
+  relativeSlugs: relativeSlugs.length,
 };
 console.log(
   `Scanned ${anchorsScanned} links, found ${results.length} distinct outside links and ${sectionLinksChecked} links to a page section, ` +
     `skipped ${skippedLinks} to local or example hosts.`,
 );
 console.log(
-  `Fail: ${counts.broken} broken, ${counts.redirectedToRoot} redirected to a site's root, ${counts.sectionNotFound} outside sections not found, ${counts.missingPageSections} page sections missing. ` +
+  `Fail: ${counts.broken} broken, ${counts.redirectedToRoot} redirected to a site's root, ${counts.sectionNotFound} outside sections not found, ${counts.missingPageSections} page sections missing, ` +
+    `${counts.notInRoutes} pages not in tools/routes.json, ${counts.relativeSlugs} slugs not starting with /. ` +
     `Information: ${counts.redirected} redirected, ${counts.blocked} blocked, ${counts.unreachable} unreachable.`,
 );
 if (results.length === 0) console.log("Found no outside links. The extractor may be broken, so this check counts as blocked.");
@@ -163,9 +180,11 @@ await writeReport("links.json", {
   sectionNotFound: pick("section not found"),
   redirectedToRoot: pick("redirected to root"),
   missingSections,
+  notInRoutes,
+  relativeSlugs,
   redirected,
   blocked: pick("blocked"),
   unreachable: pick("unreachable"),
   ok: pick("ok").map((result) => result.url),
 });
-if (counts.broken + counts.redirectedToRoot + counts.sectionNotFound + counts.missingPageSections > 0) process.exitCode = 1;
+if (counts.broken + counts.redirectedToRoot + counts.sectionNotFound + counts.missingPageSections + counts.notInRoutes + counts.relativeSlugs > 0) process.exitCode = 1;

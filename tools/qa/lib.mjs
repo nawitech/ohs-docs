@@ -1,6 +1,8 @@
-// Helpers shared by the QA checks. Pure Node, no dependencies.
+// Helpers shared by the QA checks. Node, and js-yaml from the site's packages
+// for front matter, the parser Docusaurus uses.
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import yaml from "js-yaml";
 import { outputRoot, pathExists, readJson, siteRoot, toolsRoot, writeJson } from "../scripts/shared.mjs";
 
 // Reports go to the directory given as the first argument, or to build/qa.
@@ -23,13 +25,32 @@ export async function builtPages() {
   return pages;
 }
 
-// Every Markdown page under docs/, with its path relative to the repository.
-export async function sourcePages(directory = join(siteRoot, "docs")) {
+// A page's slug from its front matter, read as YAML the way Docusaurus reads
+// it, or null when it has none, it is not a string, or the YAML is not valid.
+export function slugOf(text) {
+  const front = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
+  if (!front) return null;
+  let data;
+  try { data = yaml.load(front[1]); } catch { return null; }
+  return data && typeof data === "object" && typeof data.slug === "string" ? data.slug : null;
+}
+
+// The route Docusaurus gives a page with an absolute slug, under the site's
+// /ohs-docs/ base. A slug without a leading / is resolved against the page's
+// folder, so it gets null here, and the caller reports it.
+export const routeOfSlug = (slug) => !slug?.startsWith("/") ? null : slug === "/" ? "/ohs-docs/" : `/ohs-docs${slug.replace(/\/+$/, "")}/`;
+
+// Every Markdown file under docs/, .md and .mdx, with its path relative to the
+// repository. A file or folder whose name starts with _ is a partial, which
+// Docusaurus does not publish as a page but another page can import. Partials
+// are included with partial true, so checks of content still read them.
+export async function sourcePages(directory = join(siteRoot, "docs"), inPartial = false) {
   const pages = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) pages.push(...(await sourcePages(path)));
-    else if (entry.name.endsWith(".md")) pages.push({ file: path.slice(siteRoot.length + 1), text: await readFile(path, "utf8") });
+    const partial = inPartial || entry.name.startsWith("_");
+    if (entry.isDirectory()) pages.push(...(await sourcePages(path, partial)));
+    else if (/\.mdx?$/.test(entry.name)) pages.push({ file: path.slice(siteRoot.length + 1), text: await readFile(path, "utf8"), partial });
   }
   return pages;
 }

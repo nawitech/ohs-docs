@@ -13,7 +13,14 @@
 //             reads. Without it, --all does not run that check and says so.
 // --compare   the folder the workflow's comparison step wrote, with an earlier
 //             run's summary.json and comparison.json. Each finding is then
-//             marked new or also found. Comparing never changes the result.
+//             marked new or also found. Comparing never changes the result,
+//             except with --fail-on touched.
+// --touched <touched.json> --fail-on touched
+//             the pull request run. touched.json comes from touched.mjs. A
+//             finding fails only on a page the pull request touches, and only
+//             when main's run in --compare did not have it. An unread item
+//             fails on a touched page, or when it belongs to no page. A
+//             targets entry that names a page that does not exist fails too.
 //
 // Every finding fails the run. There is no list of known findings.
 //
@@ -37,6 +44,13 @@ const clonesAt = process.argv.indexOf("--clones");
 const clones = clonesAt < 0 ? null : process.argv[clonesAt + 1];
 const compareAt = process.argv.indexOf("--compare");
 const compareFolder = compareAt < 0 ? null : process.argv[compareAt + 1];
+const touchedAt = process.argv.indexOf("--touched");
+const touchedFile = touchedAt < 0 ? null : process.argv[touchedAt + 1];
+const failOnAt = process.argv.indexOf("--fail-on");
+const failOn = failOnAt < 0 ? "every finding" : process.argv[failOnAt + 1];
+if (failOn !== "every finding" && failOn !== "touched") throw new Error(`--fail-on takes touched, not ${failOn}`);
+if ((failOn === "touched") !== Boolean(touchedFile)) throw new Error("--touched and --fail-on touched go together");
+const pullRequest = failOn === "touched";
 
 // The docs commit the run checked. A copy made with git archive has no .git,
 // so the workflow passes it in DOCS_COMMIT.
@@ -58,6 +72,10 @@ function failuresOf(check, result) {
       for (const page of r.usedOn) items.push({ check, page, value: r.url, problem, source: r.verdict === "redirected to root" ? `redirected to ${r.finalUrl}` : `${r.verdict}, status ${r.status ?? r.error}` });
     }
     for (const m of result.missingSections) items.push({ check, page: m.page, value: m.link, problem: "the section is missing from the built page", source: "page section missing in the build" });
+    // A page the route contract lacks, whose links were never read, and a slug
+    // that gives no known route. Older reports lack both lists.
+    for (const p of result.notInRoutes ?? []) items.push({ check, page: p.route, value: "not in tools/routes.json", problem: "the page is missing from tools/routes.json, so its links are not checked", source: `${p.file}, route ${p.route}` });
+    for (const p of result.relativeSlugs ?? []) items.push({ check, page: p.file, value: `slug ${p.slug ?? "missing"}`, problem: "the slug does not start with /, so the page's route is not known", source: p.file });
   } else if (check === "source-paths") {
     for (const r of [...result.missing, ...result.notMapped])
       items.push({ check, page: r.file, value: r.module, line: r.line, problem: r.checkedAgainst ? `not a module in ${r.checkedAgainst}` : "the page is not in gradle-targets.json", source: r.checkedAgainst ?? "not in gradle-targets.json" });
@@ -140,6 +158,9 @@ const review = [];
 const information = [];
 let passed = 0, failed = 0, blocked = 0;
 const unread = new Set();
+// Each unread item as { check, page }. page is null for an item that belongs
+// to no page, such as a check with no report or a table that was not read.
+const unreadItems = [];
 // Checks that read some items but not all, for the next run's warning. It
 // does not change the result. Unread items already fail the run as blocked.
 const partial = new Set();
@@ -157,6 +178,7 @@ for (const outcome of outcomes) {
     exits[outcome.check] = `${result === undefined ? "its report from this run is not valid JSON" : "it wrote no report in this run"}, and it ${exitText(outcome)}${why ? `, ${why}` : ""}`;
     review.push(`${outcome.check}: ${result === undefined ? "report not readable" : "no report from this run"}, exit ${outcome.status ?? outcome.signal ?? "none"}${why ? `, ${why}` : ""}`);
     unread.add(outcome.check);
+    unreadItems.push({ check: outcome.check, page: null });
     continue;
   }
   let bad = 0, unknown = 0;
@@ -164,6 +186,8 @@ for (const outcome of outcomes) {
   // check. What the check added to the lists before the error is taken back.
   const marks = { review: review.length, information: information.length, partial: partial.has(outcome.check) };
   let items = [];
+  // The pages of this check's unread items. null for one that has no page.
+  let pages = [];
   try {
   if (outcome.check === "claims") {
     unknown = result.results.filter((r) => r.verdict === "blocked").length;
@@ -176,13 +200,14 @@ for (const outcome of outcomes) {
     // blocked sites and network errors, which prove nothing about the page.
     const c = result.counts;
     bad = c.broken + (c.redirectedToRoot ?? 0) + c.sectionNotFound + c.missingPageSections;
-    if (c.outsideLinks === 0) unknown = 1;
+    if (c.outsideLinks === 0) { unknown = 1; pages = [null]; }
     if (c.blocked + c.unreachable) partial.add("links");
     if (c.redirected + c.blocked + c.unreachable)
       information.push(`links: ${c.redirected} redirected, ${c.blocked} blocked, ${c.unreachable} unreachable`);
   } else if (outcome.check === "source-paths") {
     bad = result.missing.length + result.notMapped.length;
     unknown = result.unreachable.length + (result.counts.found === 0 ? 1 : 0);
+    pages = [...result.unreachable.map((r) => r.file), ...(result.counts.found === 0 ? [null] : [])];
     if (result.unreachable.length) review.push(`source paths: ${result.unreachable.length} not checked, settings file unreachable`);
     if (result.skipped.length) information.push(`source paths: ${result.skipped.length} skipped on pages listed under skip`);
   } else if (outcome.check === "versions") {
@@ -191,6 +216,7 @@ for (const outcome of outcomes) {
     // Behind the latest, and versions confirmed on the mirror, are information.
     bad = result.results.filter((r) => r.verdict.endsWith("not found")).length;
     unknown = result.results.filter((r) => r.verdict === "source unreachable").length + (result.counts.found === 0 ? 1 : 0);
+    pages = [...result.results.filter((r) => r.verdict === "source unreachable").map((r) => r.file), ...(result.counts.found === 0 ? [null] : [])];
     if (unknown) review.push(`versions: ${unknown} not checked, Maven Central and the mirror could not confirm them, or nothing was found`);
     const behind = result.results.filter((r) => r.verdict === "behind").length;
     if (behind) information.push(`versions: ${behind} behind the latest`);
@@ -199,29 +225,34 @@ for (const outcome of outcomes) {
     // Pins that disagree with the versions table, or a table that disagrees
     // with itself, fail. A table that cannot be read means nothing was decided.
     unknown = result.tableErrors.length + (result.counts.found === 0 ? 1 : 0);
+    // The versions table serves every page, so an error in it has no page.
+    pages = unknown ? [null] : [];
     if (result.tableErrors.length) review.push(`version agreement: versions table not read, ${result.tableErrors[0]}`);
     if (result.information.length) information.push(`version agreement: ${result.information.length} notes`);
   } else if (outcome.check === "lists") {
     // A value on one side and not the other fails. A list that could not be
     // read on either side compared nothing.
     unknown = result.counts.errors + (result.counts.lists === 0 ? 1 : 0);
+    pages = [...result.lists.filter((list) => list.errors.length).map((list) => list.page), ...(result.counts.lists === 0 ? [null] : [])];
     for (const list of result.lists) if (list.errors.length) review.push(`lists: ${list.id} not compared, ${list.errors[0]}`);
     if (result.counts.covered) information.push(`lists: ${result.counts.covered} parameter paths covered by a parent`);
   } else if (outcome.check === "sentence-claims") {
     // A claim whose source disagrees, or whose quote left the page, fails. A
     // claim that could not be judged, or an empty claims file, is blocked.
     unknown = result.counts.blocked + (result.counts.claims === 0 ? 1 : 0);
+    pages = [...result.results.filter((r) => r.verdict === "blocked").map((r) => r.page), ...(result.counts.claims === 0 ? [null] : [])];
     for (const r of result.results.filter((r) => r.verdict === "blocked")) review.push(`sentence claims: ${r.id} not checked, ${r.why}`);
     if (result.counts.claims === 0) review.push("sentence claims: the claims file has no claims");
   } else if (outcome.check === "commands") {
     // A missing file, script, profile or service, or an unmapped page, fails.
     // A value the check could not decide is blocked. Built-ins are information.
     unknown = result.counts.blocked + (result.counts.commands === 0 ? 1 : 0);
+    pages = [...result.results.filter((r) => r.verdict === "blocked").map((r) => r.file), ...(result.counts.commands === 0 ? [null] : [])];
     for (const r of result.results.filter((r) => r.verdict === "blocked")) review.push(`commands: ${r.value} on ${r.file}:${r.line} not checked, ${r.why}`);
     if (result.counts.commands === 0) review.push("commands: no commands found");
     if (result.counts.information) information.push(`commands: ${result.counts.information} built-in or need no compose file`);
   } else if (outcome.check === "page-symbols") {
-    unknown = (result.errors ?? []).length; if (unknown) review.push(`page symbols: ${unknown} pages not checked, clone missing`);
+    unknown = (result.errors ?? []).length; pages = unknown ? [null] : []; if (unknown) review.push(`page symbols: ${unknown} pages not checked, clone missing`);
     bad = result.absent.length; if (bad) review.push(`page symbols: ${bad} names not found`);
   }
   if (["links", "source-paths", "versions", "version-agreement", "lists", "sentence-claims", "commands"].includes(outcome.check)) {
@@ -240,6 +271,7 @@ for (const outcome of outcomes) {
     exits[outcome.check] = `its report from this run lacks fields the summary needs, and it ${exitText(outcome)}`;
     review.push(`${outcome.check}: report has the wrong shape, ${oneLine(error.message)}`);
     unread.add(outcome.check);
+    unreadItems.push({ check: outcome.check, page: null });
     continue;
   }
   findings.push(...items);
@@ -251,7 +283,12 @@ for (const outcome of outcomes) {
     exits[outcome.check] = outcome.status === 1 ? "it exited with status 1, but its report shows no findings and nothing unread" : `it ${exitText(outcome)}`;
     review.push(`${outcome.check}: ${exits[outcome.check]}`);
     unknown = Math.max(unknown, 1);
+    pages.push(null);
   }
+  // A count with no page behind it, such as a mismatch between the counts and
+  // the lists, has no page either.
+  if (unknown && !pages.length) pages = [null];
+  for (const page of new Set(pages)) unreadItems.push({ check: outcome.check, page: typeof page === "string" ? page : null });
   checkResults[outcome.check] = bad ? "fail" : unknown ? "blocked" : "pass";
   // A check that failed can still have items it could not read. It counts as
   // blocked too in the reasons the run did not pass.
@@ -294,15 +331,68 @@ else {
 if (comparison.status !== "compared") for (const item of findings) item.new = null;
 const newCount = findings.filter((item) => item.new === true).length;
 
+// The pull request run. Which pages the pull request touches, and whether a
+// finding main's run had can be excused. Each doubt fails closed, so nothing
+// is excused.
+let touched = null;
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+if (pullRequest) {
+  let data = null;
+  try { data = JSON.parse(readFileSync(touchedFile, "utf8")); } catch { data = null; }
+  const strings = (list) => Array.isArray(list) && list.every((item) => typeof item === "string");
+  const valid = data && typeof data.all === "boolean" && strings(data.files) && strings(data.routes) && strings(data.reasons ?? []) && Array.isArray(data.missingPages);
+  if (!valid) review.unshift("touched pages: touched.json is missing or not valid, so every page counts as touched");
+  const t = valid ? data : { all: true, reasons: ["touched.json is missing or not valid"], files: [], routes: [], removed: [] };
+  const files = new Set(t.files), routes = new Set(t.routes);
+  const main = t.mainChanged && strings(t.mainChanged.files) && strings(t.mainChanged.routes) ? t.mainChanged : null;
+  const changedOnMain = new Set([...(main?.files ?? []), ...(main?.routes ?? [])]);
+  // Why nothing can be excused, or null when a finding main's run had can be.
+  let earlierDocsCommit = null;
+  try { earlierDocsCommit = JSON.parse(readFileSync(join(compareFolder, "summary.json"), "utf8")).docsCommit ?? null; } catch { earlierDocsCommit = null; }
+  const headSha = comparison.headSha ?? "";
+  const noWaiver = comparison.status !== "compared" ? `not compared with main, ${comparison.status === "none" ? "main has no earlier run" : comparison.reason}`
+    : !valid ? "the touched pages are unknown"
+    : !t.since || t.since !== headSha ? "the files main changed since its run are unknown"
+    : !t.sinceOk ? "the commit main's run checked could not be read"
+    : typeof earlierDocsCommit !== "string" || !/^[0-9a-f]{7,40}$/.test(earlierDocsCommit) || !headSha.startsWith(earlierDocsCommit) ? "main's run checked a docs commit other than the one it ran on"
+    : t.mainChangedAll || !main ? `main changed a file that affects every page since its run${t.mainChangedReasons?.[0] ? `, ${t.mainChangedReasons[0]}` : ""}`
+    : null;
+  const isTouched = (page) => t.all || files.has(page) || routes.has(page);
+  for (const item of findings) {
+    item.touched = isTouched(item.page);
+    item.changedOnMain = changedOnMain.has(item.page);
+    item.onMain = !noWaiver && item.new === false && !item.changedOnMain;
+  }
+  const removed = Array.isArray(t.removed) ? t.removed.filter((entry) => entry && typeof entry.id === "string" && typeof entry.page === "string") : [];
+  // Targets entries that name a page that does not exist. Each fails the run.
+  const missingPages = (t.missingPages ?? []).map((entry) => ({
+    file: typeof entry?.file === "string" ? entry.file : "a targets file", kind: typeof entry?.kind === "string" ? entry.kind : "entry",
+    id: typeof entry?.id === "string" ? entry.id : null, page: typeof entry?.page === "string" ? entry.page : null,
+  }));
+  touched = {
+    all: t.all, reasons: t.reasons ?? [], files: t.files, routes: t.routes, removed, missingPages, valid: Boolean(valid),
+    since: t.since ?? null, mainChanged: main ?? { files: [], routes: [] }, noWaiver,
+    failing: findings.filter((item) => item.touched && !item.onMain).length,
+    onMain: findings.filter((item) => item.touched && item.onMain).length,
+    otherPages: findings.filter((item) => !item.touched).length,
+    unread: unreadItems.filter((item) => item.page === null || isTouched(item.page)),
+  };
+}
+
 // Every reason the run did not pass, in the order the summary names them.
 const failReasons = [];
-const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const runLabel = comparison.status === "compared" ? `run ${comparison.runNumber}` : null;
-if (findings.length) failReasons.push({ reason: "findings", count: findings.length, new: runLabel ? newCount : null, text: `${plural(findings.length, "finding")}${runLabel ? `, ${newCount || "none"} new compared with ${runLabel}` : ""}` });
+if (pullRequest) {
+  if (touched.failing) failReasons.push({ reason: "touched", count: touched.failing, text: `${plural(touched.failing, "finding")} on pages this pull request touches` });
+  const checks = [...new Set(touched.unread.map((item) => item.check))];
+  if (checks.length) failReasons.push({ reason: "unread", checks, count: touched.unread.length, text: `${plural(checks.length, "check")} could not read every item` });
+  const missing = touched.missingPages.length;
+  if (missing) failReasons.push({ reason: "missing page", count: missing, text: `${plural(missing, "targets entry", "targets entries")} ${missing === 1 ? "names" : "name"} a page that does not exist` });
+} else if (findings.length) failReasons.push({ reason: "findings", count: findings.length, new: runLabel ? newCount : null, text: `${plural(findings.length, "finding")}${runLabel ? `, ${newCount || "none"} new compared with ${runLabel}` : ""}` });
 // Claims and page symbols fail without findings this summary lists.
 const failedOther = Object.keys(checkResults).filter((check) => checkResults[check] === "fail" && !findings.some((item) => item.check === check));
 if (failedOther.length) failReasons.push({ reason: "failed", checks: failedOther, text: `${failedOther.join(" and ")} failed` });
-if (unread.size) failReasons.push({ reason: "blocked", checks: [...unread], text: `${plural(unread.size, "check")} blocked` });
+if (!pullRequest && unread.size) failReasons.push({ reason: "blocked", checks: [...unread], text: `${plural(unread.size, "check")} blocked` });
 if (notRun.length) failReasons.push({ reason: "not run", count: notRun.length, text: `${plural(notRun.length, "check")} did not run` });
 if (ranSelect && !selection) failReasons.push({ reason: "no selection", text: "the changed pages are unknown" });
 const result = failReasons.length ? "fail" : "pass";
@@ -312,6 +402,13 @@ const compared = comparison.status === "compared" ? `run ${comparison.runNumber}
 console.log(`Result: ${result}, docs commit ${docsCommit}`);
 if (failReasons.length) console.log(`Why: ${failReasons.map((r) => r.text).join(", ")}`);
 console.log(`Compared with: ${compared}`);
+if (pullRequest) {
+  console.log(`Touched: ${touched.all ? `every page, ${touched.reasons.join(", ")}` : `${plural(touched.files.length, "file")}${touched.routes.length ? ` (${touched.routes.join(", ")})` : ""}`}`);
+  console.log(`On touched pages: ${touched.failing} to fix, ${touched.onMain} already on main${touched.noWaiver ? `. Nothing excused, ${touched.noWaiver}` : ""}`);
+  console.log(`On other pages: ${touched.otherPages}`);
+  if (touched.removed.length) console.log(`Checks removed: ${touched.removed.map((entry) => `${entry.kind} ${entry.id} for ${entry.page}`).join(", ")}`);
+  if (touched.missingPages.length) console.log(`Missing pages: ${touched.missingPages.map((entry) => `${entry.kind} ${entry.id ?? "without an id"} in ${entry.file} names ${entry.page ?? "no page"}`).join(", ")}`);
+}
 if (runLabel) console.log(`New: ${newCount ? findings.filter((item) => item.new).map(name).join("; ") : "nothing"}`);
 console.log(`Findings: ${findings.length ? findings.map(name).join("; ") : "nothing"}`);
 const blockedChecks = Object.keys(checkResults).filter((check) => checkResults[check] === "blocked" || (exits[check] && unread.has(check)));
@@ -329,14 +426,21 @@ console.log("");
 // The commit of the checks themselves, the fork commit GitHub ran.
 const checksCommit = /^[0-9a-f]{40}$/.test(process.env.GITHUB_SHA ?? "") ? process.env.GITHUB_SHA : null;
 writeFileSync(join(reportDirectory, "summary.json"), JSON.stringify({
-  schemaVersion: 2, checkedAt: new Date().toISOString(), docsCommit, checksCommit, result, failReasons, checks: checkResults,
-  findings, blocked: blockedChecks, partial: [...partial].filter((check) => !blockedChecks.includes(check)), unread: [...unread], exits, notRun, reviewNeeded: review, information, comparison,
+  schemaVersion: 2, checkedAt: new Date().toISOString(), docsCommit, checksCommit, failOn, result, failReasons, checks: checkResults,
+  findings, blocked: blockedChecks, partial: [...partial].filter((check) => !blockedChecks.includes(check)), unread: [...unread], unreadItems, exits, notRun, reviewNeeded: review, information, comparison,
+  ...(touched ? { touched } : {}),
 }, null, 2) + "\n");
 // Plain sentences for the workflow to show if job-summary.mjs fails.
-const sentences = [result === "pass" ? "The run passed. No findings." : "The run failed."];
-if (findings.length) sentences.push(`${failReasons[0].text.charAt(0).toUpperCase()}${failReasons[0].text.slice(1)}.`);
-for (const r of failReasons.slice(findings.length ? 1 : 0)) sentences.push(`${r.text.charAt(0).toUpperCase()}${r.text.slice(1)}${r.checks ? `, ${r.checks.join(", ")}` : ""}.`);
-sentences.push(comparison.status === "compared" ? `Compared with run ${comparison.runNumber}.` : comparison.status === "none" ? "No earlier run to compare with." : `Comparison unavailable, ${comparison.reason}.`);
+// Each sentence comes from a reason's own text, so no reason is assumed to be
+// first. A findings reason has no checks, so it reads as before.
+const sentences = [result === "fail" ? "The run failed." : findings.length ? "The run passed. Nothing to fix on the pages this pull request touches." : "The run passed. No findings."];
+for (const r of failReasons) sentences.push(`${r.text.charAt(0).toUpperCase()}${r.text.slice(1)}${r.checks ? `, ${r.checks.join(", ")}` : ""}.`);
+if (pullRequest) {
+  sentences.push(comparison.status === "compared" ? `Compared with main's run ${comparison.runNumber}.` : `Not compared with main, ${comparison.status === "none" ? "main has no earlier run" : comparison.reason}.`);
+  if (touched.noWaiver && comparison.status === "compared") sentences.push(`No finding was excused as already on main, because ${touched.noWaiver}.`);
+  sentences.push(touched.all ? "This pull request changes files that affect every page." : `This pull request touches ${plural(touched.files.length, "page")}.`);
+  if (touched.otherPages) sentences.push(`${plural(touched.otherPages, "finding")} on other pages ${touched.otherPages === 1 ? "is" : "are"} not this pull request's to fix.`);
+} else sentences.push(comparison.status === "compared" ? `Compared with run ${comparison.runNumber}.` : comparison.status === "none" ? "No earlier run to compare with." : `Comparison unavailable, ${comparison.reason}.`);
 sentences.push(`The docs commit was ${docsCommit}. Every finding is in summary.json.`);
 writeFileSync(join(reportDirectory, "fallback.txt"), sentences.join("\n") + "\n");
 if (result === "fail") process.exitCode = 1;

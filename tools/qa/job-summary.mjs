@@ -146,6 +146,13 @@ const compared = comparison.status === "compared";
 const runName = compared ? `run ${comparison.runNumber}` : null;
 const news = findings.filter((item) => item.new === true);
 const also = findings.filter((item) => item.new === false);
+// A pull request run. run.mjs marked each finding touched and onMain.
+const pr = summary.failOn === "touched" && summary.touched && typeof summary.touched === "object" ? summary.touched : null;
+const PR_NUMBER = /^[1-9][0-9]*$/.test(process.env.PR_NUMBER ?? "") ? process.env.PR_NUMBER : null;
+const BASE = /^[\w./-]+$/.test(process.env.BASE_REF ?? "") ? process.env.BASE_REF : "main";
+const toFix = pr ? findings.filter((item) => item.touched && !item.onMain) : [];
+const onMain = pr ? findings.filter((item) => item.touched && item.onMain) : [];
+const otherPages = pr ? findings.filter((item) => !item.touched) : [];
 
 // Why each blocked check could not decide, read from its own report and from
 // how the check exited.
@@ -231,10 +238,19 @@ const reasonText = (r) => {
   if (r.reason === "blocked") return `${plural((r.checks ?? []).length, "check")} blocked`;
   if (r.reason === "not run") return `${plural(r.count, "check")} did not run`;
   if (r.reason === "no selection") return "the changed pages are unknown";
+  if (r.reason === "touched") return `${plural(r.count, "finding")} on pages this pull request touches`;
+  if (r.reason === "unread") return `${plural((r.checks ?? []).length, "check")} could not read every item`;
+  if (r.reason === "missing page") return `${plural(r.count, "targets entry", "targets entries")} ${r.count === 1 ? "names" : "name"} a page that does not exist`;
   return r.text ?? r.reason;
 };
 const reasons = (summary.failReasons ?? []).map(reasonText);
 if (summary.result !== "pass" && !reasons.length) reasons.push("the checks failed");
+if (pr) {
+  if (!reasons.length) reasons.push(summary.result === "pass" ? "no findings on pages this pull request touches" : "the checks failed");
+  if (onMain.length) reasons.push(`${onMain.length} already on ${BASE}`);
+  if (otherPages.length) reasons.push(`${otherPages.length} on other pages`);
+  if (!compared) reasons.push(`not compared with ${BASE}`);
+}
 const lead = reasons.length ? reasons.join(", ") : "no findings";
 add(`## ${prose(sentence(lead))}`);
 
@@ -244,11 +260,21 @@ const toolsRepo = oneLine(process.env.GITHUB_REPOSITORY ?? "");
 const toolsAt = /^[0-9a-f]{40}$/.test(SHA) && /^[\w.-]+\/[\w.-]+$/.test(toolsRepo)
   ? ` with checks from ${code(toolsRepo)} at ${link(`${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${toolsRepo}/commit/${SHA}`, code(SHA.slice(0, 7)))}`
   : ". The commit of the checks themselves is not known";
-add(para(`Checked ${code(DOCS_REPO)} at ${commitUrl ? link(commitUrl, code(commit)) : code(commit)}${toolsAt}, ${text(String(summary.checkedAt ?? "").replace("T", " ").slice(0, 16))} UTC.`));
+if (pr) add(para(`Checked the merge of ${PR_NUMBER ? `pull request ${link(`https://github.com/${DOCS_REPO}/pull/${PR_NUMBER}`, text(`#${PR_NUMBER}`))}` : "this pull request"} into ${code(BASE)}, at ${code(commit)}, with the checks it holds, ${text(String(summary.checkedAt ?? "").replace("T", " ").slice(0, 16))} UTC.`));
+else add(para(`Checked ${code(DOCS_REPO)} at ${commitUrl ? link(commitUrl, code(commit)) : code(commit)}${toolsAt}, ${text(String(summary.checkedAt ?? "").replace("T", " ").slice(0, 16))} UTC.`));
 
 // What the findings were compared with.
 const day = (value) => text(String(value ?? "").slice(0, 10));
-if (compared) {
+if (pr) {
+  const runUrl = /^[\w.-]+\/[\w.-]+$/.test(toolsRepo) && compared ? `${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${toolsRepo}/actions/runs/${comparison.runId}` : null;
+  const parts = [];
+  if (compared) parts.push(`Compared with ${text(BASE)}'s ${runUrl ? link(runUrl, text(runName)) : text(runName)} on ${day(comparison.createdAt)}.`);
+  else parts.push(`Not compared with ${text(BASE)}, ${prose(comparison.status === "none" ? `${BASE} has no earlier run` : comparison.reason ?? "no reason given")}. Every finding on a touched page counts.`);
+  if (compared && pr.noWaiver) parts.push(`No finding counts as already on ${text(BASE)}, because ${prose(pr.noWaiver)}.`);
+  const files = Array.isArray(pr.files) ? pr.files : [];
+  parts.push(pr.all ? `This pull request changes files that affect every page, ${prose((pr.reasons ?? []).slice(0, 5).join(", ") || "for a reason not given")}.` : `This pull request touches ${plural(files.length, "page")}${files.length ? `, ${files.slice(0, 10).map((f) => pageCell(f)).join(", ")}${files.length > 10 ? ` and ${files.length - 10} more` : ""}` : ""}.`);
+  add(para(parts.join(" ")));
+} else if (compared) {
   const runUrl = /^[\w.-]+\/[\w.-]+$/.test(toolsRepo) ? `${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${toolsRepo}/actions/runs/${comparison.runId}` : null;
   add(para(`Compared with ${runUrl ? link(runUrl, text(runName)) : text(runName)} on ${day(comparison.createdAt)}.`));
   // A finding in a check the earlier run could not fully read may show as new
@@ -276,7 +302,11 @@ const unreadItems = {
   "source-paths": (r) => (r?.unreachable ?? []).length > 0,
   "version-agreement": (r) => (r?.tableErrors ?? []).length > 0,
 };
-const partlyRead = Object.keys(unreadItems).filter((check) => !blocked.includes(check) && unreadItems[check](reports[check]));
+// The checks whose reasons go under the rerun item. In a pull request run,
+// only checks that failed it. The others' reasons stay review items.
+const unreadFail = pr ? [...new Set((summary.failReasons ?? []).find((r) => r.reason === "unread")?.checks ?? [])] : [];
+const rerun = pr ? unreadFail : blocked;
+const partlyRead = Object.keys(unreadItems).filter((check) => !rerun.includes(check) && unreadItems[check](reports[check]));
 // run.mjs starts most Review needed lines with a check label and a colon. The
 // summary shows the check's name in bold and the rest as a sentence.
 const LINE_NAMES = { select: "Changed pages", "page symbols": "Page symbols" };
@@ -292,7 +322,7 @@ const reviewLine = (line) => {
 const otherReview = review.filter((line) => {
   const label = Object.keys(REVIEW_LABELS).find((l) => line.startsWith(l));
   const check = label ? REVIEW_LABELS[label] : Object.keys(CHECK_NAMES).find((key) => line.startsWith(`${key}:`));
-  return !(check && (blocked.includes(check) || partlyRead.includes(check)));
+  return !(check && (rerun.includes(check) || partlyRead.includes(check)));
 });
 // Each item is HTML. Reasons from blockedReasons are escaped already.
 const reviewItems = [
@@ -301,14 +331,27 @@ const reviewItems = [
 ];
 const todo = [];
 if (notRun.length) todo.push(`Fix the run. Not run ${notRun.map(code).join(", ")}.`);
-if (blocked.length) {
+if (pr) {
+  if (unreadFail.length) {
+    const why = unreadFail.flatMap((check) => blockedReasons(check).map((reason) => `<b>${checkName(check)}</b>. ${reason}`));
+    todo.push(`Rerun the workflow. ${unreadFail.map(checkName).join(", ")} could not read every item on the pages this pull request touches, or did not finish. A blocked site or a slow registry usually clears on a rerun. If it does not, fix the cause.${list(why.slice(0, ROWS))}`);
+  }
+} else if (blocked.length) {
   const why = blocked.flatMap((check) => blockedReasons(check).map((reason) => `<b>${checkName(check)}</b>. ${reason}`));
   todo.push(`Rerun the workflow. ${plural(blocked.length, "check")} could not decide, ${blocked.map(checkName).join(", ")}. If a rerun is blocked again, fix the cause.${list(why.slice(0, ROWS))}`);
 }
 const failedOther = (summary.failReasons ?? []).find((r) => r.reason === "failed");
 if (failedOther) todo.push(`Read run-output.txt for ${failedOther.checks.map(checkName).join(" and ")}. ${failedOther.checks.length === 1 ? "It" : "They"} failed without a finding this summary can list.`);
 if (reviewItems.length) todo.push(`Read ${plural(reviewItems.length, "item")} the checks could not settle.${list(reviewItems.slice(0, ROWS).concat(reviewItems.length > ROWS ? [`And ${reviewItems.length - ROWS} more. The full list is in summary.json.`] : []))}`);
-if (findings.length) todo.push(`${news.length ? `Start with the ${plural(news.length, "new finding")}. ` : ""}Fix each finding in the docs, or post a GitHub issue if it needs a decision. If a check is wrong, fix the check instead.`);
+const missingPages = pr && Array.isArray(pr.missingPages) ? pr.missingPages : [];
+if (missingPages.length) todo.push(`Fix each targets entry that names a page that does not exist. Point it at the page, or remove it if the page is gone.${list(missingPages.slice(0, ROWS).map((entry) => `${entry.id ? code(entry.id) : "An entry without an id"}, ${prose(entry.kind)} in ${code(String(entry.file ?? "").split("/").pop())}, names ${entry.page ? code(entry.page) : "no page"}.`))}`);
+const removed = pr && Array.isArray(pr.removed) ? pr.removed : [];
+if (removed.length) todo.push(`Confirm each check this pull request removes. Its page stays, so the removal must be meant, for example a claim whose sentence was reworded.${list(removed.slice(0, ROWS).map((entry) => `${code(entry.id)}, ${prose(entry.kind)} in ${code(String(entry.file ?? "").split("/").pop())}, for ${pageCell(entry.page)}.`))}`);
+const refused = pr ? [...(reports.links?.blocked ?? []), ...(reports.links?.unreachable ?? [])].filter((r) => (r.usedOn ?? []).some((page) => pr.all || (pr.routes ?? []).includes(page))) : [];
+if (refused.length) todo.push(`Open each link by hand before merging. ${plural(refused.length, "link")} on the pages this pull request touches could not be judged. ${refused.length === 1 ? "It is" : "They are"} under Not compared.`);
+if (pr) {
+  if (toFix.length) todo.push(`Fix each finding on the pages this pull request touches. If a check is wrong, fix the check. Findings already on ${text(BASE)}, and on other pages, are not this pull request's to fix.`);
+} else if (findings.length) todo.push(`${news.length ? `Start with the ${plural(news.length, "new finding")}. ` : ""}Fix each finding in the docs, or post a GitHub issue if it needs a decision. If a check is wrong, fix the check instead.`);
 if (todo.length) {
   add(heading("What to do"));
   add(list(todo));
@@ -329,12 +372,27 @@ const checked = (check) => {
 };
 const countBy = (items, check) => items.filter((item) => item.check === check).length;
 add(heading("Checks"));
-add(table(["Check", "Result", "Checked", "Findings", ...(compared ? ["New"] : [])], Object.entries(summary.checks ?? {}).map(([check, result]) => [
+if (pr) add(table(["Check", "Result", "Checked", "Findings", "To fix here"], Object.entries(summary.checks ?? {}).map(([check, result]) => [
+  checkName(check), result === "pass" ? "pass" : `<b>${text(result)}</b>`, text(checked(check)), String(countBy(findings, check)), String(countBy(toFix, check)),
+])));
+else add(table(["Check", "Result", "Checked", "Findings", ...(compared ? ["New"] : [])], Object.entries(summary.checks ?? {}).map(([check, result]) => [
   checkName(check), result === "pass" ? "pass" : `<b>${text(result)}</b>`, text(checked(check)), String(countBy(findings, check)), ...(compared ? [String(countBy(news, check))] : []),
 ])));
+if (pr) {
+  const changed = toFix.filter((item) => item.new === false && item.changedOnMain).length;
+  if (unreadFail.length === 0 && Object.values(summary.checks ?? {}).includes("blocked")) add(para(`A check marked blocked could not read some items, but none on the pages this pull request touches. The next scheduled run on ${text(BASE)} reads them again.`));
+  if (changed) add(para(`${plural(changed, "finding")} below ${changed === 1 ? "was" : "were"} in ${text(BASE)}'s run, but ${text(BASE)} changed ${changed === 1 ? "its page" : "their pages"} since, so ${changed === 1 ? "it counts" : "they count"} here.`));
+}
 
 const FINDING_HEAD = ["Check", "Page", "Finding"];
-if (compared) {
+if (pr) {
+  if (toFix.length) {
+    add(heading(`On touched pages (${toFix.length})`));
+    add(table(FINDING_HEAD, findingRows(toFix)));
+  }
+  if (onMain.length) add(folded(`Already on ${text(BASE)} (${onMain.length})`, [table(FINDING_HEAD, findingRows(onMain))]));
+  if (otherPages.length) add(folded(`Not touched by this pull request (${otherPages.length})`, [table(FINDING_HEAD, findingRows(otherPages))]));
+} else if (compared) {
   if (news.length) {
     add(heading(`New compared with ${text(runName)} (${news.length})`));
     add(table(FINDING_HEAD, findingRows(news)));
@@ -362,8 +420,10 @@ if (notes.length) look.push(["Version agreement notes", null, ["Page", "Note"], 
 const covered = (reports.lists?.lists ?? []).flatMap((l) => (l.covered ?? []).map((r) => ({ ...r, id: l.id })));
 if (covered.length) look.push(["List values accepted through a parent path", "The page lists the parent path, which covers the value in the code.", ["List", "Value in the code", "Parent on the page"], covered.map((r) => [code(r.id), code(r.value), code(r.parent)])]);
 
-if (links?.blocked?.length) skipped.push(["Links not judged, the site refused or failed", links.blocked.map((r) => `${valueCell(r.url)}, answered ${code(r.status)}, used on ${usedOn(r)}.`)]);
-if (links?.unreachable?.length) skipped.push(["Links not reached, network error", links.unreachable.map((r) => `${valueCell(r.url)}, ${code(r.error)}, used on ${usedOn(r)}.`)]);
+const onTouched = (r) => pr && (r.usedOn ?? []).some((page) => pr.all || (pr.routes ?? []).includes(page));
+const touchedNote = (r) => (onTouched(r) ? " On a touched page, open it by hand before merging." : "");
+if (links?.blocked?.length) skipped.push(["Links not judged, the site refused or failed", links.blocked.map((r) => `${valueCell(r.url)}, answered ${code(r.status)}, used on ${usedOn(r)}.${touchedNote(r)}`)]);
+if (links?.unreachable?.length) skipped.push(["Links not reached, network error", links.unreachable.map((r) => `${valueCell(r.url)}, ${code(r.error)}, used on ${usedOn(r)}.${touchedNote(r)}`)]);
 // Only versions the mirror listed. A version it did not list is under What to do instead.
 const mirrored = new Map();
 for (const r of reports.versions?.results ?? []) {
