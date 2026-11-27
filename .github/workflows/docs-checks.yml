@@ -1,0 +1,222 @@
+# Scheduled docs checks for ohs-docs.
+#
+# GitHub runs the schedule only on the default branch, main. A run started by
+# hand checks the branch it is started on.
+#
+# Each run builds the docs at the commit it runs on with the check scripts in
+# tools/qa, then checks links, Gradle module names, package versions,
+# version agreement, the Portal routes list, sentence claims, and docker
+# compose and npm commands. The last three read the code repositories with git
+# ls-remote, raw file URLs and shallow sparse checkouts. Sentence claims parse
+# Compose files with js-yaml, which npm ci installs with the docs. The commands
+# check runs docker compose config, which the ubuntu-24.04 image includes. It
+# contacts no Docker daemon and starts nothing.
+#
+# Every finding fails the run, until the page is fixed on the branch. A check
+# that could not decide fails it too. There is no list of known findings. Each
+# run compares its findings with the summary.json of the nearest earlier run on
+# the same branch, so the summary lists new findings first. Comparing never
+# changes the result. The reports are uploaded as an artifact, and the summary
+# is shown on the run page.
+#
+# The workflow reads only. It needs no secrets, and it posts nothing. It reads
+# earlier runs and their artifacts with the workflow token, which needs actions
+# read.
+
+name: Docs checks
+
+on:
+  schedule:
+    # Monday, Wednesday and Friday at 06:17 UTC. A minute past the hour,
+    # because GitHub delays schedules that start on the hour.
+    - cron: "17 6 * * 1,3,5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: docs-checks
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    # The status check's name. Branch protection selects a required check by
+    # this name.
+    name: Docs checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # The runner context is not available in job-level env, so the reports
+      # folder is set here for the later steps.
+      - name: Set the reports folder
+        run: echo "REPORTS=$RUNNER_TEMP/docs-checks-reports" >> "$GITHUB_ENV"
+
+      # The pages and the check scripts, at the commit the run is on.
+      - name: Check out the docs
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # check:build asserts Node 24.18.0 and npm 11.16.0 exactly.
+      - name: Set up Node 24.18.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.18.0
+          cache: npm
+
+      - name: Install npm 11.16.0
+        run: npm install -g npm@11.16.0
+
+      - name: Install and build the docs
+        run: |
+          npm ci
+          npm run check:build
+
+      # Finds the nearest earlier run of docs-checks.yml on BRANCH whose artifact
+      # holds a summary.json that compare.mjs accepts, looking at most 10 runs
+      # back. docs-checks-pr.yml runs the same step with BRANCH set to the pull
+      # request's base branch. COMPARE_MJS is where compare.mjs is in the
+      # checkout. It writes summary.json and comparison.json into a work
+      # folder, then renames it to $RUNNER_TEMP/compare, so run.mjs sees both
+      # files or neither.
+      # comparison.json comes from GitHub's run data, not from the artifact.
+      # If this step fails or runs out of time, the folder is missing, and the
+      # run goes on with no comparison.
+      - name: Find an earlier run to compare with
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          BRANCH: ${{ github.ref_name }}
+          COMPARE_MJS: tools/qa/compare.mjs
+        run: |
+          OUT="$RUNNER_TEMP/compare"
+          WORK="$RUNNER_TEMP/compare-work"
+          rm -rf "$OUT" "$WORK"
+          mkdir -p "$WORK/out"
+          write() { # status, tried, reason
+            jq -n --arg status "$1" --argjson tried "$2" --arg reason "$3" --arg repo "$REPO" --arg branch "$BRANCH" \
+              '{status: $status, repository: $repo, workflow: "docs-checks.yml", branch: $branch, tried: $tried} + (if $reason == "" then {} else {reason: $reason} end)' \
+              > "$WORK/out/comparison.json"
+            mv "$WORK/out" "$OUT"
+            echo "No comparison. Status $1${3:+, $3}."
+            exit 0
+          }
+          CREATED="$(gh run view "$RUN_ID" --repo "$REPO" --json createdAt --jq .createdAt)" || write unavailable 0 "api error"
+          FIELDS=databaseId,number,attempt,event,createdAt,headSha
+          # The filter on creation time comes before the limit, so a rerun of
+          # an old run still finds the runs before it. If GitHub refuses the
+          # filter, the newest 30 runs are read instead. If all 30 are newer
+          # than this run, earlier runs may still exist, so the comparison is
+          # unavailable, not none.
+          LIMIT=10
+          RUNS="$(gh run list --repo "$REPO" --workflow docs-checks.yml --branch "$BRANCH" --status completed --created "<$CREATED" --limit 10 --json "$FIELDS")" \
+            || { LIMIT=30; RUNS="$(gh run list --repo "$REPO" --workflow docs-checks.yml --branch "$BRANCH" --status completed --limit 30 --json "$FIELDS")"; } \
+            || write unavailable 0 "api error"
+          LISTED="$(jq length <<< "$RUNS")"
+          RUNS="$(jq -c --arg created "$CREATED" --argjson self "$RUN_ID" '[.[] | select(.createdAt < $created and .databaseId != $self)] | sort_by(.createdAt) | reverse | .[:10]' <<< "$RUNS")"
+          COUNT="$(jq length <<< "$RUNS")"
+          if [ "$COUNT" -eq 0 ]; then
+            [ "$LIMIT" -eq 30 ] && [ "$LISTED" -ge 30 ] && write unavailable 0 "the list of earlier runs was cut short"
+            write none 0 ""
+          fi
+          TRIED=0
+          for i in $(seq 0 $((COUNT - 1))); do
+            RUN="$(jq -c ".[$i]" <<< "$RUNS")"
+            ID="$(jq -r .databaseId <<< "$RUN")"
+            NAME="docs-checks-$(jq -r .number <<< "$RUN")"
+            TRIED=$((TRIED + 1))
+            # size_in_bytes is the zip size. A folder over 20 MB unzipped, or a
+            # summary.json over 5 MB, is skipped too.
+            ART="$(gh api "repos/$REPO/actions/runs/$ID/artifacts" --jq ".artifacts[] | select(.name == \"$NAME\")")" || continue
+            [ -n "$ART" ] && [ "$(jq -r .expired <<< "$ART")" = false ] && [ "$(jq -r .size_in_bytes <<< "$ART")" -le 5000000 ] || continue
+            DIR="$WORK/run-$ID"
+            mkdir "$DIR"
+            gh run download "$ID" --repo "$REPO" --name "$NAME" --dir "$DIR" || continue
+            [ "$(du -sk "$DIR" | cut -f1)" -le 20000 ] && [ -f "$DIR/summary.json" ] && [ "$(wc -c < "$DIR/summary.json")" -le 5000000 ] || continue
+            node "$COMPARE_MJS" --check "$DIR/summary.json" || continue
+            cp "$DIR/summary.json" "$WORK/out/summary.json"
+            jq --argjson tried "$TRIED" --arg repo "$REPO" --arg branch "$BRANCH" \
+              '{status: "compared", repository: $repo, workflow: "docs-checks.yml", branch: $branch, tried: $tried, runId: .databaseId, runNumber: .number, attempt: .attempt, event: .event, createdAt: .createdAt, headSha: .headSha}' \
+              <<< "$RUN" > "$WORK/out/comparison.json"
+            mv "$WORK/out" "$OUT"
+            echo "Comparing with $NAME, run $ID."
+            exit 0
+          done
+          write unavailable "$TRIED" "no usable artifact in 10 runs"
+
+      - name: Run the checks
+        run: |
+          mkdir -p "$REPORTS"
+          export DOCS_COMMIT="$(git rev-parse --short HEAD)"
+          echo "Checking $GITHUB_REPOSITORY $GITHUB_REF_NAME at $DOCS_COMMIT"
+          node tools/qa/run.mjs "$REPORTS" --compare "$RUNNER_TEMP/compare" 2>&1 | tee "$REPORTS/run-output.txt"
+
+      # job-summary.mjs writes the summary from the reports. It says what to do,
+      # and lists each finding with its page, value and problem, new ones first.
+      # It escapes text from the pages, so that text cannot change the layout.
+      # It needs only the checkout, so it works even when the build failed,
+      # and then says the checks did not finish. If job-summary.mjs itself
+      # fails, the step shows fallback.txt, the plain sentences run.mjs writes,
+      # or the last 20 lines of run-output.txt when there is none.
+      # When the checks never ran, for example because the build failed, a
+      # status file still goes into the reports folder, so the artifact exists.
+      # The summary is also saved as job-summary.md in the artifact.
+      - name: Write the job summary
+        if: always()
+        env:
+          ARTIFACT_NAME: docs-checks-${{ github.run_number }}
+          BASE_REF: ${{ github.ref_name }}
+          DOCS_REPO: ${{ github.repository }}
+        run: |
+          REPORTS="${REPORTS:-$RUNNER_TEMP/docs-checks-reports}"
+          echo "REPORTS=$REPORTS" >> "$GITHUB_ENV"
+          mkdir -p "$REPORTS"
+          if [ ! -f "$REPORTS/run-output.txt" ]; then
+            echo "The checks did not run. An earlier step failed. Read the job log of run ${{ github.run_id }}." > "$REPORTS/status.txt"
+          fi
+          # GitHub refuses a step summary over 1 MiB, so a larger one also falls
+          # back. The fallback escapes the lines and drops carriage returns, so
+          # text from the pages stays inside its <pre> block.
+          SUMMARY="$RUNNER_TEMP/job-summary.md"
+          if node tools/qa/job-summary.mjs "$REPORTS" > "$SUMMARY" && [ "$(wc -c < "$SUMMARY")" -le 1000000 ]; then
+            echo "Wrote the detailed job summary."
+          else
+            {
+              echo "## Docs checks"
+              echo
+              echo "The detailed summary could not be written. Read the job log."
+              echo
+              echo "<pre>"
+              if [ -f "$REPORTS/fallback.txt" ]; then
+                tr -d '\r' < "$REPORTS/fallback.txt" | cut -c1-4000 | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+              elif [ -f "$REPORTS/run-output.txt" ]; then
+                tail -n 20 "$REPORTS/run-output.txt" | tr -d '\r' | cut -c1-4000 | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+                echo "The checks did not finish. Read the job log."
+              else
+                echo "The checks did not run. Read the job log."
+              fi
+              echo "</pre>"
+              echo
+              echo "The reports are in the artifact $ARTIFACT_NAME."
+            } > "$SUMMARY"
+          fi
+          cp "$SUMMARY" "$REPORTS/job-summary.md"
+          cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-checks-${{ github.run_number }}
+          path: ${{ env.REPORTS }}
+          retention-days: 90
+          if-no-files-found: warn

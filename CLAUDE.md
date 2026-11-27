@@ -22,6 +22,8 @@ npm run gates         # all three in order
 
 `smoke:paths` reads `build/` output, so run `check:build` first (or use `gates`). All three gates are pure Node with no browser or network; CI (`.github/workflows/checks.yml`) runs `npm run gates` on every PR, and deploy re-runs validate + build.
 
+The docs checks run in CI, not in the gates. `.github/workflows/docs-checks-pr.yml` runs on every PR and fails on new findings on the pages the PR touches. `.github/workflows/docs-checks.yml` runs on Monday, Wednesday and Friday, and by hand, and fails on every finding. Both build the site, then run `node tools/qa/run.mjs`, which reads the code repositories, Maven Central and outside links over the network.
+
 ## Architecture
 
 - **`sidebars.js` is the information architecture**, defined explicitly. A new Markdown file does not appear until it is listed there. There are five sidebars, one per top-level section: `aboutSidebar`, `learnSidebar` (pillars, with FHIR Foundations and OHS Player nested as categories), `buildSidebar` (get started, run guides, configure, extend, tutorials and codelabs), `solutionsSidebar`, and `communitySidebar`. Sidebar placement and directory paths are deliberately independent. For example, `docs/components/*/overview` sits in Learn while `docs/components/*/run` sits in Build.
@@ -32,6 +34,7 @@ npm run gates         # all three in order
 - **`tools/routes.json` is the route contract**: the list of paths that must exist (all under `/ohs-docs/` with trailing slash). Add an entry when adding a page. It deliberately does not restate page copy — `smoke:paths` derives each page's expected title from the page's own frontmatter.
 - `src/theme/Layout` and `src/theme/DocRoot/Layout` are also swizzled to strip the default Docusaurus navbar, footer, and docs grid, because the OHS shells supply their own chrome.
 - **`legacy-ohs-dev/` is source material, not site content.** It holds Markdown scraped from the old developers.google.com/open-health-stack site (by `tools/extract_ohs_dev.py`) to migrate into `docs/`. It is never published or validated. `TODO.md` tracks migration and content work.
+- **`tools/qa/` holds the docs checks.** Seven checks compare facts on the pages with the code, packages and sites they describe. A page with `./gradlew`, `docker compose` or `npm` commands needs an entry in `tools/qa/gradle-targets.json` or `tools/qa/command-targets.json`, or the checks fail it as not mapped. `tools/qa/README.md` explains each check and how to read a failed run.
 - **Published slugs are permanent.** When a page moves or is renamed, add a redirect to `@docusaurus/plugin-client-redirects` in `docusaurus.config.js` and update `tools/routes.json` in the same change.
 
 ## Authoring rules (enforced by `npm run validate`)
